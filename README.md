@@ -55,7 +55,7 @@ isobar_samples:
      description: Number of configurations to be sampled.
      value: 10000
    number_nucleons: 
-      description: Mass number Z of the nuclei.
+      description: Mass number A of the nuclei.
       value: 208    
    seeds_file:
      description: Input file with list of seeds for nucleon positions.
