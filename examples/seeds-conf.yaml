@@ -3,7 +3,7 @@ isobar_seeds:
    description: Configurations for making list of seeds for nucleon positions.
    
    number_nucleons: 
-      description: Mass number Z of the nuclei.
+      description: Mass number A of the nuclei.
       value: 208
    
    number_configs:
