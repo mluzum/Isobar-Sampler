@@ -3,7 +3,9 @@
 ## 1. Description
 
 Allows sampling isobars nuclear configurations for running initial conditions for hydrodynamic simulations of ultrarelativistic nucleus-nucleus collisions in an efficient manner. 
+
 It works by creating a bank of 'seeds', random numbers that can be used to calculate nucleon positions within different nuclear structures. These seeds are then used to generate nuclear configurations, consisting of an array of shape `(number_configurations, number_nucleons, 3)`, which stores nucleon positions `{x, y, z}`, in Cartesian coordinates.
+
 Results are saved in HDF format and can be used with T<sub>R</sub>ENTo.
 
 ## 2. Usage
@@ -13,7 +15,9 @@ The code works in two stages.
 ### 2.1. Create Seeds
 
 First, a bank of 'seeds' must be created, by running
+
 `./exec/make_seeds.py [seed_conf_file] `
+
 The output is saved in HDF format, in a database named `isobar_seeds`.
 
 ##### Example configuration file:
@@ -39,6 +43,7 @@ isobar_seeds:
 ### 2.2. Build Nuclear Configurations
 
 Nuclear configurations are built by running
+
 `./exec/build_isobars.py [isobar_conf_file]`
 
 ##### Example configuration file:
@@ -84,7 +89,9 @@ The output is saved in separate HDF files in the specified output path, with the
 ## 3. Usage with T<sub>R</sub>ENTo
 
 These nuclear configurations can be used within T<sub>R</sub>ENTo to generate initial conditions. The syntax is as follows:
+
 `trento isobar.hdf isobar.hdf --random-seed random_seed [...]`
+
 where the random seed should be specified for the different isobars so T<sub>R</sub>ENTo picks corresponding configurations and applies the same random rotation.
 
 
