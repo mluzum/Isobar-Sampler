@@ -34,7 +34,11 @@ isobar_properties:
     
      beta_2:
        description: Quadrupolar deformation beta_2 of isobar.
-       value: 0
+       value: 0.16
+
+     gamma:
+       description: Quadrupolar deformation angle (in radians).
+       value: 0.5236
         
      beta_3:
        description: Octupolar deformation beta_3 of isobar.
@@ -45,14 +49,18 @@ isobar_properties:
         
      step_radius:
        description: Step-function radius in diffuse step function parametrization.
-       value: 5.23813
+       value: 5.20678
     
      diffusiveness:
        description: Gaussian blurring width in diffuse step function parametrization.
-       value: 0.870378
+       value: 0.772445
     
      beta_2:
        description: Quadrupolar deformation beta_2 of isobar.
+       value: 0.16
+        
+     gamma:
+       description: Quadrupolar deformation angle (in radians).
        value: 0
         
      beta_3:
@@ -64,6 +72,75 @@ isobar_properties:
         
      step_radius:
        description: Step-function radius in diffuse step function parametrization.
+       value: 5.20678
+    
+     diffusiveness:
+       description: Gaussian blurring width in diffuse step function parametrization.
+       value: 0.772445
+    
+     beta_2:
+       description: Quadrupolar deformation beta_2 of isobar.
+       value: 0.16
+        
+     gamma:
+       description: Quadrupolar deformation angle (in radians).
+       value: 0
+        
+     beta_3:
+       description: Octupolar deformation beta_3 of isobar.
+       value: 0.20
+
+   isobar4:
+     isobar_name: WS4
+        
+     step_radius:
+       description: Step-function radius in diffuse step function parametrization.
+       value: 5.20678
+    
+     diffusiveness:
+       description: Gaussian blurring width in diffuse step function parametrization.
+       value: 0.772445
+    
+     beta_2:
+       description: Quadrupolar deformation beta_2 of isobar.
+       value: 0.06
+        
+     gamma:
+       description: Quadrupolar deformation angle (in radians).
+       value: 0
+        
+     beta_3:
+       description: Octupolar deformation beta_3 of isobar.
+       value: 0.20
+
+   isobar5:
+     isobar_name: WS5
+        
+     step_radius:
+       description: Step-function radius in diffuse step function parametrization.
+       value: 5.23813
+    
+     diffusiveness:
+       description: Gaussian blurring width in diffuse step function parametrization.
+       value: 0.870378
+    
+     beta_2:
+       description: Quadrupolar deformation beta_2 of isobar.
+       value: 0.06
+        
+     gamma:
+       description: Quadrupolar deformation angle (in radians).
+       value: 0
+        
+     beta_3:
+       description: Octupolar deformation beta_3 of isobar.
+       value: 0.20
+
+   isobar6:
+     isobar_name: WS6
+        
+     step_radius:
+       description: Step-function radius in diffuse step function parametrization.
        value: 5.17005
     
      diffusiveness:
@@ -72,8 +149,12 @@ isobar_properties:
     
      beta_2:
        description: Quadrupolar deformation beta_2 of isobar.
+       value: 0.06
+        
+     gamma:
+       description: Quadrupolar deformation angle (in radians).
        value: 0
         
      beta_3:
        description: Octupolar deformation beta_3 of isobar.
-       value: 0
+       value: 0.20

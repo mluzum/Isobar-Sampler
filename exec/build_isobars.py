@@ -16,6 +16,7 @@ import h5py
 import sys
 import os
 import yaml
+import math
 # import numpy.random as random
 from yaml.loader import SafeLoader
 
@@ -26,11 +27,17 @@ GAUSS_SEEDS = ['gauss_x','gauss_y','gauss_z'] # Gaussian seeds
 UNIFORM_SEEDS = ['radius','costheta','phi']
 #%%
 
-def sph_harmonic_2(costheta,phi):
-    return np.sqrt(5./(4.*np.pi))*(3.*costheta**2 -1)/2.
+def sph_harmonic_22(costheta,phi):
+    return 1./4.*np.sqrt(15./(2.*np.pi))*math.cos(2*phi)*(1.-costheta**2)
 
-def int_sph_harmonic_2(costheta,phi):
-    return (np.sqrt(5./np.pi)/4.)*(costheta**3 -costheta)
+def int_sph_harmonic_22(costheta,phi):
+    return 1./4.*np.sqrt(15./(2.*np.pi))*math.cos(2*phi)*(costheta -costheta**3/3.)
+
+def sph_harmonic_20(costheta,phi):
+    return 1./4.*np.sqrt(5./np.pi)*(3.*costheta**2 -1)
+
+def int_sph_harmonic_20(costheta,phi):
+    return 1./4.*np.sqrt(5./np.pi)*(costheta**3 -costheta)
 
 def sph_harmonic_3(costheta,phi):
     return np.sqrt(7./(4.*np.pi))*(5.*costheta**3 -3.*costheta)/2.
@@ -38,10 +45,14 @@ def sph_harmonic_3(costheta,phi):
 def int_sph_harmonic_3(costheta,phi):
     return (np.sqrt(7./np.pi)/4.)*(5.*costheta**4/4. - 3.*costheta**2/2.)
 
-def deform(r,costheta,phi,beta2,beta3):
-    r = r*(1. + beta2*sph_harmonic_2(costheta, phi) + beta3*sph_harmonic_3(costheta, phi))
-    costheta = costheta - 3.*(beta2*int_sph_harmonic_2(costheta, phi) + beta3*int_sph_harmonic_3(costheta, phi))
+def deform(r,costheta,phi,beta2,gamma,beta3):
+    beta20 = beta2*math.cos(gamma)
+    beta22 = beta2*2./np.sqrt(2.)*math.sin(gamma)
+    r = r*(1. + beta20*sph_harmonic_20(costheta, phi) + beta22*sph_harmonic_22(costheta, phi) + beta3*sph_harmonic_3(costheta, phi))
+    costheta = costheta - 3.*(beta2*(math.cos(gamma)*int_sph_harmonic_20(costheta, phi) + 2./np.sqrt(2.)*math.sin(gamma)*int_sph_harmonic_22(costheta, phi)) + beta3*int_sph_harmonic_3(costheta, phi))
     phi = phi
+    if costheta > 1.:
+        print("Cos(theta) > 1!")
     
     return r, costheta, phi
 
@@ -53,7 +64,7 @@ def cartesian(r,costheta,phi):
     
     return x, y, z
 #%% 
-def place_nucleon(R_step, w_gauss, beta2, beta3, seed):
+def place_nucleon(R_step, w_gauss, beta2, gamma, beta3, seed):
     # radial coordinate
     radius_seed = seed[POS_SEEDS['radius']]
     # p(r) ~ r²dr, cdf(r) ~ r³, r ~ seed_r^(1/3), cdf sampled uniform [0,1]
@@ -79,18 +90,18 @@ def place_nucleon(R_step, w_gauss, beta2, beta3, seed):
     r = r + diffusiveness_seed*w_gauss;
     
     # deformation
-    r, costheta, phi = deform(r,costheta,phi,beta2,beta3)
+    r, costheta, phi = deform(r,costheta,phi,beta2, gamma,beta3)
     
     # cartesian coordinates
     x, y, z = cartesian(r,costheta,phi)
     
     return np.array([x,y,z])
     
-def build_nucleus(seeds_nucleus, n_nucleons, R_step, w_gauss, beta2, beta3):
+def build_nucleus(seeds_nucleus, n_nucleons, R_step, w_gauss, beta2, gamma, beta3):
 
     nucleus = np.zeros((n_nucleons,3))
     for n in range(n_nucleons):
-        nucleus[n,:] = place_nucleon(R_step, w_gauss, beta2, beta3, seeds_nucleus[n])
+        nucleus[n,:] = place_nucleon(R_step, w_gauss, beta2, gamma,  beta3, seeds_nucleus[n])
         
     return nucleus
     
@@ -124,8 +135,9 @@ def main():
             Rstep = isobar_conf['step_radius']['value']
             diffusiveness = isobar_conf['diffusiveness']['value']
             beta2 = isobar_conf['beta_2']['value']
+            gamma = isobar_conf['gamma']['value']
             beta3 = isobar_conf['beta_3']['value']
-            isobars += [ [Rstep,diffusiveness,beta2,beta3] ]
+            isobars += [ [Rstep,diffusiveness,beta2,gamma,beta3] ]
             isobar_names += [ isobar_conf['isobar_name'] ]
             n_isobars +=1
         
