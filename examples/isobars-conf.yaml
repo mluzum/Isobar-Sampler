@@ -38,7 +38,7 @@ isobar_properties:
 
      gamma:
        description: Quadrupolar deformation angle (in radians).
-       value: 0.5236
+       value: 0.0005236
         
      beta_3:
        description: Octupolar deformation beta_3 of isobar.

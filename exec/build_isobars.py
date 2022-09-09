@@ -28,10 +28,10 @@ UNIFORM_SEEDS = ['radius','costheta','phi']
 #%%
 
 def sph_harmonic_22(costheta,phi):
-    return 1./4.*np.sqrt(15./(2.*np.pi))*math.cos(2*phi)*(1.-costheta**2)
+    return 1./4.*np.sqrt(15./np.pi)*math.cos(2*phi)*(1.-costheta**2)
 
 def int_sph_harmonic_22(costheta,phi):
-    return 1./4.*np.sqrt(15./(2.*np.pi))*math.cos(2*phi)*(costheta -costheta**3/3.)
+    return 1./4.*np.sqrt(15./np.pi)*math.cos(2*phi)*(costheta -costheta**3/3.)
 
 def sph_harmonic_20(costheta,phi):
     return 1./4.*np.sqrt(5./np.pi)*(3.*costheta**2 -1)
@@ -47,12 +47,14 @@ def int_sph_harmonic_3(costheta,phi):
 
 def deform(r,costheta,phi,beta2,gamma,beta3):
     beta20 = beta2*math.cos(gamma)
-    beta22 = beta2*2./np.sqrt(2.)*math.sin(gamma)
+    beta22 = beta2*math.sin(gamma)
     r = r*(1. + beta20*sph_harmonic_20(costheta, phi) + beta22*sph_harmonic_22(costheta, phi) + beta3*sph_harmonic_3(costheta, phi))
-    costheta = costheta - 3.*(beta2*(math.cos(gamma)*int_sph_harmonic_20(costheta, phi) + 2./np.sqrt(2.)*math.sin(gamma)*int_sph_harmonic_22(costheta, phi)) + beta3*int_sph_harmonic_3(costheta, phi))
+    costheta = costheta - 3.*(beta20*int_sph_harmonic_20(costheta, phi) + beta22*int_sph_harmonic_22(costheta, phi) + beta3*int_sph_harmonic_3(costheta, phi))
     phi = phi
     if costheta > 1.:
         print("Cos(theta) > 1!")
+    if costheta < -1.:
+        print("Cos(theta) < -1!")
     
     return r, costheta, phi
 
