@@ -4,7 +4,7 @@ isobar_samples:
       
    number_configs:
      description: Number of configurations to be sampled.
-     value: 10000
+     value: 100000
      
    number_nucleons: 
       description: Mass number A of the nuclei.
@@ -38,7 +38,7 @@ isobar_properties:
 
      gamma:
        description: Quadrupolar deformation angle (in radians).
-       value: 0.0005236
+       value: 0.5236
         
      beta_3:
        description: Octupolar deformation beta_3 of isobar.

@@ -28,10 +28,14 @@ UNIFORM_SEEDS = ['radius','costheta','phi']
 #%%
 
 def sph_harmonic_22(costheta,phi):
+    cos2phi = math.cos(2*phi)
+#    cos2phi = 1.
     return 1./4.*np.sqrt(15./np.pi)*math.cos(2*phi)*(1.-costheta**2)
 
 def int_sph_harmonic_22(costheta,phi):
-    return 1./4.*np.sqrt(15./np.pi)*math.cos(2*phi)*(costheta -costheta**3/3.)
+    cos2phi = math.cos(2*phi)
+#    cos2phi = 1.
+    return 1./4.*np.sqrt(15./np.pi)*cos2phi*(costheta -costheta**3/3.)
 
 def sph_harmonic_20(costheta,phi):
     return 1./4.*np.sqrt(5./np.pi)*(3.*costheta**2 -1)
@@ -45,16 +49,30 @@ def sph_harmonic_3(costheta,phi):
 def int_sph_harmonic_3(costheta,phi):
     return (np.sqrt(7./np.pi)/4.)*(5.*costheta**4/4. - 3.*costheta**2/2.)
 
-def deform(r,costheta,phi,beta2,gamma,beta3):
+def deform(r,costheta,phi,R_step, w_gauss,beta2,gamma,beta3):
+    w = w_gauss
+    rt2 = math.sqrt(2)
+    rho = math.sqrt(np.pi/2)*w_gauss*(math.erf(r/w/rt2) - math.erf((R_step-r)/w/rt2))
+    gaussr = math.exp(-r**2/2/w**2)
+    gaussRstep = math.exp(-R_step**2/2/w**2)
+    exprR = math.exp(r*R_step/w**2)
+    rtpi2 = math.sqrt(np.pi/2)
+    int2xrho = rtpi2*w_gauss*(
+            gaussr*gaussRstep*rtpi2*w*(
+                gaussr**(-1)*R_step - exprR*(r+R_step)
+                )
+            + (R_step**2 + w**2 - r**2) + math.erf((r-R_step)/w/rt2) + (R_step**2 + w**2 + r**2)*math.erf(R_step/w/rt2)
+            )
     beta20 = beta2*math.cos(gamma)
     beta22 = beta2*math.sin(gamma)
-    r = r*(1. + beta20*sph_harmonic_20(costheta, phi) + beta22*sph_harmonic_22(costheta, phi) + beta3*sph_harmonic_3(costheta, phi))
-    costheta = costheta - 3.*(beta20*int_sph_harmonic_20(costheta, phi) + beta22*int_sph_harmonic_22(costheta, phi) + beta3*int_sph_harmonic_3(costheta, phi))
+#    r = r*(1. + beta20*sph_harmonic_20(costheta, phi) + beta22*sph_harmonic_22(costheta, phi) + beta3*sph_harmonic_3(costheta, phi))
+    r += beta20*sph_harmonic_20(costheta, phi) + beta22*sph_harmonic_22(costheta, phi) + beta3*sph_harmonic_3(costheta, phi)*(1 - int2xrho/r**2/rho)
+    costheta = costheta #- 3.*(beta20*int_sph_harmonic_20(costheta, phi) + beta22*int_sph_harmonic_22(costheta, phi) + beta3*int_sph_harmonic_3(costheta, phi))
     phi = phi
-    if costheta > 1.:
-        print("Cos(theta) > 1!")
-    if costheta < -1.:
-        print("Cos(theta) < -1!")
+#    if costheta > 1.:
+#        print("Cos(theta) > 1!")
+#    if costheta < -1.:
+#        print("Cos(theta) < -1!")
     
     return r, costheta, phi
 
@@ -92,7 +110,7 @@ def place_nucleon(R_step, w_gauss, beta2, gamma, beta3, seed):
     r = r + diffusiveness_seed*w_gauss;
     
     # deformation
-    r, costheta, phi = deform(r,costheta,phi,beta2, gamma,beta3)
+    r, costheta, phi = deform(r,costheta,phi,R_step,w_gauss,beta2, gamma,beta3)
     
     # cartesian coordinates
     x, y, z = cartesian(r,costheta,phi)
