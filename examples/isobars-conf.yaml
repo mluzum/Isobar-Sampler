@@ -4,7 +4,7 @@ isobar_samples:
       
    number_configs:
      description: Number of configurations to be sampled.
-     value: 100000
+     value: 10000
      
    number_nucleons: 
       description: Mass number A of the nuclei.
