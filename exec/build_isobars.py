@@ -52,11 +52,14 @@ def int_sph_harmonic_3(costheta,phi):
 def deform(r,costheta,phi,R_step, w_gauss,beta2,gamma,beta3):
     w = w_gauss
 #    rt2 = math.sqrt(2)
-    rt6 = math.sqrt(6)
+#    rt6 = math.sqrt(6)
 #    rho = math.sqrt(np.pi/2)*w_gauss*(math.erf(r/w/rt2) - math.erf((R_step-r)/w/rt2))
 #    gaussr = math.exp(-r**2/2/w**2)
 #    gaussRstep = math.exp(-R_step**2/2/w**2)
 #    exprR = math.exp(r*R_step/w**2)
+#    erfr = math.erf(r/w/rt2)
+#    erfrmR = math.erf((r-R_step)/w/rt2)
+#    erfRstep = math.erf(R_step/w/rt2)
 #    rtpi2 = math.sqrt(np.pi/2)
 #    int2xrho = rtpi2*w_gauss*(
 #            gaussr*gaussRstep*rtpi2*w*(
@@ -64,11 +67,34 @@ def deform(r,costheta,phi,R_step, w_gauss,beta2,gamma,beta3):
 #                )
 #            + (R_step**2 + w**2 - r**2) + math.erf((r-R_step)/w/rt2) + (R_step**2 + w**2 + r**2)*math.erf(R_step/w/rt2)
 #            )
-    int2xrhooverr2rho = 2*(-12*math.exp(-(r-R_step)**2/6/w**2)*w**2
-            +2*math.exp(-R_step**2/6/w**2) * (-r*R_step+6*w) + math.sqrt(6*np.pi)*w*(
-                (R_step - r)*math.erf((r-R_step)/w/rt6) + (R_step + r)*math.erf(R_step/w/rt6)))/r**2/(
-                    2*math.exp(-(r-R_step)**2/6/w**2)*(r-R_step) - 2*math.exp(-R_step**2/6/w**2)*R_step
-                        + math.sqrt(6*np.pi)*w*(-math.erf((r-R_step)/w/rt6) + math.erf(R_step/w/rt6)))
+
+
+#    int2xrhooverr2rho = 2*(-12*math.exp(-(r-R_step)**2/6/w**2)*w**2
+#            +2*math.exp(-R_step**2/6/w**2) * (-r*R_step+6*w) + math.sqrt(6*np.pi)*w*(
+#                (R_step - r)*math.erf((r-R_step)/w/rt6) + (R_step + r)*math.erf(R_step/w/rt6)))/r**2/(
+#                    2*math.exp(-(r-R_step)**2/6/w**2)*(r-R_step) - 2*math.exp(-R_step**2/6/w**2)*R_step
+#                        + math.sqrt(6*np.pi)*w*(-math.erf((r-R_step)/w/rt6) + math.erf(R_step/w/rt6)))
+#
+# ratio \int 2x \rho/(r^2 \rho), as required in the transormation formula
+#   Typed by hand by reading Mathematica output:
+#    int2xrhooverr2rho = gaussr*gaussRstep*w*( \
+#            5/gaussR*r*(r**2+e*w**2)+R_step/gaussr*(R_step**2+17*w) - exprR*(5*r**3+r**2*R_step+r*R_step**2+R_step**3 + (15*r+17*R_step)*w**2)\ 
+#            + (  math.sqrt(np.pi/2)*w*(r**4-15*w**4)*erfr + \
+#                    math.sqrt(np.pi/2)*w*(-r**4+R_step**4+18*R_step**2*w**2+15*w**4)*erfrmR + \
+#                    math.sqrt(np.pi/2)*w*(R_step**4 + 18*R_step**2*w**2+15*w**4)*erfRstep)   ) / \
+#                    ( r**4*(
+    #
+    #
+    #  Copied and pasted from FortranForm Mathematical output
+    int2xrhooverr2rho = (math.sqrt(np.pi/2.)*w*((math.sqrt(2/np.pi)*w*(5*math.exp(R_step**2/(2.*w**2))*r*(r**2 + 3*w**2) + \
+            math.exp(r**2/(2.*w**2))*R_step*(R_step**2 + 17*w**2) - math.exp((r*R_step)/w**2)* \
+            (5*r**3 + r**2*R_step + r*R_step**2 + R_step**3 + (15*r + 17*R_step)*w**2))) / \
+            math.exp((r**2 + R_step**2)/(2.*w**2)) + \
+            (r**4 - 15*w**4)*math.erf(r/(math.sqrt(2)*w)) + (-r**4 + R_step**4 + \
+            18*R_step**2*w**2 + 15*w**4)*math.erf((r - R_step)/(math.sqrt(2)*w)) + \
+            (R_step**4 + 18*R_step**2*w**2 + 15*w**4)*math.erf(R_step/(math.sqrt(2)*w))))/ \
+            (r**4*((-2*r)/math.exp(r**2/(2.*w**2)) + (2*(r - R_step))/math.exp((r - R_step)**2/(2.*w**2)) + \
+            math.sqrt(2*np.pi)*w*(math.erf(r/(math.sqrt(2)*w)) - math.erf((r - R_step)/(math.sqrt(2)*w)))))
     beta20 = beta2*math.cos(gamma)
     beta22 = beta2*math.sin(gamma)
 #    r = r*(1. + beta20*sph_harmonic_20(costheta, phi) + beta22*sph_harmonic_22(costheta, phi) + beta3*sph_harmonic_3(costheta, phi))
