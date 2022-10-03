@@ -51,61 +51,23 @@ def int_sph_harmonic_3(costheta,phi):
 
 def deform(r,costheta,phi,R_step, w_gauss,beta2,gamma,beta3):
     w = w_gauss
-#    rt2 = math.sqrt(2)
-#    rt6 = math.sqrt(6)
-#    rho = math.sqrt(np.pi/2)*w_gauss*(math.erf(r/w/rt2) - math.erf((R_step-r)/w/rt2))
-#    gaussr = math.exp(-r**2/2/w**2)
-#    gaussRstep = math.exp(-R_step**2/2/w**2)
-#    exprR = math.exp(r*R_step/w**2)
-#    erfr = math.erf(r/w/rt2)
-#    erfrmR = math.erf((r-R_step)/w/rt2)
-#    erfRstep = math.erf(R_step/w/rt2)
-#    rtpi2 = math.sqrt(np.pi/2)
-#    int2xrho = rtpi2*w_gauss*(
-#            gaussr*gaussRstep*rtpi2*w*(
-#                gaussr**(-1)*R_step - exprR*(r+R_step)
-#                )
-#            + (R_step**2 + w**2 - r**2) + math.erf((r-R_step)/w/rt2) + (R_step**2 + w**2 + r**2)*math.erf(R_step/w/rt2)
-#            )
 
-
-#    int2xrhooverr2rho = 2*(-12*math.exp(-(r-R_step)**2/6/w**2)*w**2
-#            +2*math.exp(-R_step**2/6/w**2) * (-r*R_step+6*w) + math.sqrt(6*np.pi)*w*(
-#                (R_step - r)*math.erf((r-R_step)/w/rt6) + (R_step + r)*math.erf(R_step/w/rt6)))/r**2/(
-#                    2*math.exp(-(r-R_step)**2/6/w**2)*(r-R_step) - 2*math.exp(-R_step**2/6/w**2)*R_step
-#                        + math.sqrt(6*np.pi)*w*(-math.erf((r-R_step)/w/rt6) + math.erf(R_step/w/rt6)))
-#
-# ratio \int 2x \rho/(r^2 \rho), as required in the transormation formula
-#   Typed by hand by reading Mathematica output:
-#    int2xrhooverr2rho = gaussr*gaussRstep*w*( \
-#            5/gaussR*r*(r**2+e*w**2)+R_step/gaussr*(R_step**2+17*w) - exprR*(5*r**3+r**2*R_step+r*R_step**2+R_step**3 + (15*r+17*R_step)*w**2)\ 
-#            + (  math.sqrt(np.pi/2)*w*(r**4-15*w**4)*erfr + \
-#                    math.sqrt(np.pi/2)*w*(-r**4+R_step**4+18*R_step**2*w**2+15*w**4)*erfrmR + \
-#                    math.sqrt(np.pi/2)*w*(R_step**4 + 18*R_step**2*w**2+15*w**4)*erfRstep)   ) / \
-#                    ( r**4*(
-    #
-    #
-    #  Copied and pasted from FortranForm Mathematical output
-    int2xrhooverr2rho = (math.sqrt(np.pi/2.)*w*((math.sqrt(2/np.pi)*w*(5*math.exp(R_step**2/(2.*w**2))*r*(r**2 + 3*w**2) + \
-            math.exp(r**2/(2.*w**2))*R_step*(R_step**2 + 17*w**2) - math.exp((r*R_step)/w**2)* \
-            (5*r**3 + r**2*R_step + r*R_step**2 + R_step**3 + (15*r + 17*R_step)*w**2))) / \
-            math.exp((r**2 + R_step**2)/(2.*w**2)) + \
-            (r**4 - 15*w**4)*math.erf(r/(math.sqrt(2)*w)) + (-r**4 + R_step**4 + \
-            18*R_step**2*w**2 + 15*w**4)*math.erf((r - R_step)/(math.sqrt(2)*w)) + \
-            (R_step**4 + 18*R_step**2*w**2 + 15*w**4)*math.erf(R_step/(math.sqrt(2)*w))))/ \
-            (r**4*((-2*r)/math.exp(r**2/(2.*w**2)) + (2*(r - R_step))/math.exp((r - R_step)**2/(2.*w**2)) + \
-            math.sqrt(2*np.pi)*w*(math.erf(r/(math.sqrt(2)*w)) - math.erf((r - R_step)/(math.sqrt(2)*w)))))
+    
+    int2xrhooverr2rho = (-2*math.sqrt(np.pi)*(-((((-1 + math.exp((2*r*R_step)/w**2))*r + \
+        (1 + math.exp((2*r*R_step)/w**2) - 2*math.exp((r*(r + 2*R_step))/(2.*w**2)))*R_step)*w)/ \
+        (math.exp((r + R_step)**2/(2.*w**2))*math.sqrt(2*np.pi))) + \
+        ((-r**2 + R_step**2 + w**2)*math.erf((r - R_step)/(math.sqrt(2)*w)))/2. + \
+        (R_step - w)*(R_step + w)*math.erf(R_step/(math.sqrt(2)*w)) + w**2*math.erf((-r + R_step)/(math.sqrt(2)*w)) + \
+        ((r**2 - R_step**2 + w**2)*math.erf((r + R_step)/(math.sqrt(2)*w)))/2.))/ \
+        (r**2*((math.sqrt(2)*(math.exp(-(r - R_step)**2/(2.*w**2)) - math.exp(-(r + R_step)**2/(2.*w**2)))*w)/r + \
+           math.sqrt(np.pi)*(math.erf((r - R_step)/(math.sqrt(2)*w)) - math.erf((r + R_step)/(math.sqrt(2)*w)))))
     beta20 = beta2*math.cos(gamma)
     beta22 = beta2*math.sin(gamma)
-#    r = r*(1. + beta20*sph_harmonic_20(costheta, phi) + beta22*sph_harmonic_22(costheta, phi) + beta3*sph_harmonic_3(costheta, phi))
-#    r += beta20*sph_harmonic_20(costheta, phi) + beta22*sph_harmonic_22(costheta, phi) + beta3*sph_harmonic_3(costheta, phi)*(1 - int2xrho/r**2/rho)
-    r += beta20*sph_harmonic_20(costheta, phi) + beta22*sph_harmonic_22(costheta, phi) + beta3*sph_harmonic_3(costheta, phi)*(1 - int2xrhooverr2rho)
+
+    r += (beta20*sph_harmonic_20(costheta, phi) + beta22*sph_harmonic_22(costheta, phi) + beta3*sph_harmonic_3(costheta, phi))*(1 - int2xrhooverr2rho)
     costheta = costheta #- 3.*(beta20*int_sph_harmonic_20(costheta, phi) + beta22*int_sph_harmonic_22(costheta, phi) + beta3*int_sph_harmonic_3(costheta, phi))
     phi = phi
-#    if costheta > 1.:
-#        print("Cos(theta) > 1!")
-#    if costheta < -1.:
-#        print("Cos(theta) < -1!")
+
     
     return r, costheta, phi
 
@@ -132,15 +94,29 @@ def place_nucleon(R_step, w_gauss, beta2, gamma, beta3, seed):
     # uniform in [0,2 pi]
     phi = 2.*np.pi*phi_seed
     
+    sintheta = np.sqrt(1.-costheta**2)
+    oldz = r*costheta
+    oldx = r*sintheta*np.cos(phi)
+    oldy = r*sintheta*np.sin(phi)
+    
     # folding with 3d gaussian
     gauss_seed_x = seed[POS_SEEDS['gauss_x']]
     gauss_seed_y = seed[POS_SEEDS['gauss_y']]
     gauss_seed_z = seed[POS_SEEDS['gauss_z']]
+    
+    newz = oldz + w_gauss*gauss_seed_z
+    newx = oldx + w_gauss*gauss_seed_x
+    newy = oldy + w_gauss*gauss_seed_y
+    
+    r = math.sqrt(newz**2+newx**2+newy**2)
+    phi = math.atan2(newy,newx)
+    costheta = newz/r
+    
     # combine three gaussians in quadrature to get '3d' number
-    diffusiveness_seed = np.sqrt(gauss_seed_x*gauss_seed_x  + gauss_seed_y*gauss_seed_y + gauss_seed_z*gauss_seed_z)
+    #diffusiveness_seed = np.sqrt(gauss_seed_x*gauss_seed_x  + gauss_seed_y*gauss_seed_y + gauss_seed_z*gauss_seed_z)
     
     # diffuse theta function parametrization
-    r = r + diffusiveness_seed*w_gauss;
+    #r = r + diffusiveness_seed*w_gauss;
     
     # deformation
     r, costheta, phi = deform(r,costheta,phi,R_step,w_gauss,beta2, gamma,beta3)
