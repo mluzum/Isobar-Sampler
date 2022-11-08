@@ -8,7 +8,7 @@ isobar_samples:
      
    number_nucleons: 
       description: Mass number A of the nuclei.
-      value: 208    
+      value: 96    
    
    seeds_file:
      description: Input file with list of seeds for nucleon positions.
@@ -16,7 +16,7 @@ isobar_samples:
    
    output_path:
       description: Output directory where to save 
-      dirname: test
+      dirname: nuclei
 
 isobar_properties:
    description: Nuclear properties of isobars to be sampled. Entries = isobar1, isobar2, ... Results are saved to isobar_name.hdf
@@ -44,6 +44,14 @@ isobar_properties:
        description: Octupolar deformation beta_3 of isobar.
        value: 0
 
+     WS_radius:
+       description: Woods-Saxon radius parameter
+       value: 5.09
+
+     WS_diffusiveness:
+       description: Woods-Saxon diffusiveness parameter A
+       value: 0.46
+
    isobar2:
      isobar_name: WS2
         
@@ -66,6 +74,14 @@ isobar_properties:
      beta_3:
        description: Octupolar deformation beta_3 of isobar.
        value: 0
+
+     WS_radius:
+       description: Woods-Saxon radius parameter
+       value: 5.09
+
+     WS_diffusiveness:
+       description: Woods-Saxon diffusiveness parameter A
+       value: 0.46
 
    isobar3:
      isobar_name: WS3
@@ -90,6 +106,14 @@ isobar_properties:
        description: Octupolar deformation beta_3 of isobar.
        value: 0.20
 
+     WS_radius:
+       description: Woods-Saxon radius parameter
+       value: 5.09
+
+     WS_diffusiveness:
+       description: Woods-Saxon diffusiveness parameter A
+       value: 0.46
+
    isobar4:
      isobar_name: WS4
         
@@ -112,6 +136,14 @@ isobar_properties:
      beta_3:
        description: Octupolar deformation beta_3 of isobar.
        value: 0.20
+
+     WS_radius:
+       description: Woods-Saxon radius parameter
+       value: 5.09
+
+     WS_diffusiveness:
+       description: Woods-Saxon diffusiveness parameter A
+       value: 0.46
 
    isobar5:
      isobar_name: WS5
@@ -136,6 +168,14 @@ isobar_properties:
        description: Octupolar deformation beta_3 of isobar.
        value: 0.20
 
+     WS_radius:
+       description: Woods-Saxon radius parameter
+       value: 5.09
+
+     WS_diffusiveness:
+       description: Woods-Saxon diffusiveness parameter A
+       value: 0.52
+
    isobar6:
      isobar_name: WS6
         
@@ -158,3 +198,12 @@ isobar_properties:
      beta_3:
        description: Octupolar deformation beta_3 of isobar.
        value: 0.20
+
+     WS_radius:
+       description: Woods-Saxon radius parameter
+       value: 5.02
+
+     WS_diffusiveness:
+       description: Woods-Saxon diffusiveness parameter A
+       value: 0.52
+

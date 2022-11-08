@@ -4,7 +4,7 @@ isobar_seeds:
    
    number_nucleons: 
       description: Mass number A of the nuclei.
-      value: 208
+      value: 96
    
    number_configs:
       description: How many sets of nucleon positions to sample?
