@@ -65,7 +65,7 @@ def der_z(r,z,Rint,aint,lint,nlint):
 
 
 def sph_harmonic_22(costheta,phi):
-    cos2phi = math.cos(2*phi)
+#     cos2phi = math.cos(2*phi)
 #    cos2phi = 1.
     return 1./4.*np.sqrt(15./np.pi)*math.cos(2*phi)*(1.-costheta**2)
 
@@ -125,7 +125,7 @@ def cartesian(r,costheta,phi):
     
     return x, y, z
 #%% 
-def place_nucleon(R_step, w_gauss, beta2, gamma, beta3, Rws, seed, f2, fp2, f3, fp3):
+def place_nucleon(Rws, R_step, w_gauss, beta2, gamma, beta3, seed, f2, fp2, f3, fp3):
     # radial coordinate
     radius_seed = seed[POS_SEEDS['radius']]
     # p(r) ~ r²dr, cdf(r) ~ r³, r ~ seed_r^(1/3), cdf sampled uniform [0,1]
@@ -163,7 +163,7 @@ def place_nucleon(R_step, w_gauss, beta2, gamma, beta3, Rws, seed, f2, fp2, f3, 
     beta20 = beta2*math.cos(gamma)
     beta22 = beta2*math.sin(gamma)
     if (beta20 != 0 or beta22 != 0 or beta3 != 0):
-        nsteps = 15
+        nsteps = 30
         for step in range(nsteps):
             r,costheta,phi = deform(r,costheta,phi,Rws,beta20/nsteps,beta22/nsteps,beta3/nsteps, f2, fp2,f3,fp3)
     
@@ -186,14 +186,14 @@ def place_nucleon(R_step, w_gauss, beta2, gamma, beta3, Rws, seed, f2, fp2, f3, 
     
     return np.array([x,y,z])
     
-def build_nucleus(seeds_nucleus, n_nucleons, R_step, w_gauss, beta2, gamma, beta3, f2, fp2, f3, fp3):
+def build_nucleus(seeds_nucleus, n_nucleons, Rws, aws, R_step, w_gauss, beta2, gamma, beta3, f2, fp2, f3, fp3):
 
 #     nucleus = Parallel(n_jobs=60)(delayed(place_nucleon)(R_step, w_gauss, beta2, gamma,  beta3, seeds_nucleus[n], f2, fp2, f3, fp3) for n in range(n_nucleons))
 #     nucleus = np.array(nucleus)
     
     nucleus = np.zeros((n_nucleons,3))
     for n in range(n_nucleons):
-        nucleus[n,:] = place_nucleon(R_step, w_gauss, beta2, gamma,  beta3, seeds_nucleus[n], f2, fp2, f3, fp3)
+        nucleus[n,:] = place_nucleon(Rws, R_step, w_gauss, beta2, gamma,  beta3, seeds_nucleus[n], f2, fp2, f3, fp3)
         
     return nucleus
 
@@ -223,8 +223,8 @@ def main():
     n_isobars = 0
     isobars = []
     isobar_names = []
-    Rws = 0
-    aws = 0
+#     Rws = 0
+#     aws = 0
     # print(confs.keys())
 
     while ('isobar'+str(n_isobars+1) in confs['isobar_properties'].keys()):
@@ -236,7 +236,7 @@ def main():
             beta3 = isobar_conf['beta_3']['value']
             Rws = isobar_conf['WS_radius']['value']
             aws = isobar_conf['WS_diffusiveness']['value']
-            isobars += [ [R_step,diffusiveness,beta2,gamma,beta3] ]
+            isobars += [ [Rws,aws,R_step,diffusiveness,beta2,gamma,beta3] ]
             isobar_names += [ isobar_conf['isobar_name'] ]
             n_isobars +=1
         
@@ -244,8 +244,8 @@ def main():
 
     isobars = np.array(isobars)
     for i in range(n_isobars):
-        R_step = isobars[i,0]
-        a = isobars[i,1]
+        Rws = isobars[i,0]
+        aws = isobars[i,1]
         if Rws == 0 or aws == 0:
             raise Exception('Need to specify WS_radius and WS_diffusiveness in input file')
         print("Solving differential equation")
