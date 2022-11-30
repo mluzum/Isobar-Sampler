@@ -8,9 +8,13 @@ isobar_seeds:
    
    number_configs:
       description: How many sets of nucleon positions to sample?
-      value: 500000
+      value: 100000
          
    output_file:
       description: Path where to save list of seeds for nucleon positions.
       filename: nucleon-seeds.hdf
+      
+   number_of_parallel_processes:
+       description: Number of processes to compute in parallel.  
+       value: 40
       

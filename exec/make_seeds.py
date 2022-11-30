@@ -65,8 +65,11 @@ def main():
     n_configs = conf_seed['number_configs']['value']
     n_nucleons = conf_seed['number_nucleons']['value']
     out_file = conf_seed['output_file']['filename']
+    njobs = 1  # default to serial calculation
+    if 'number_of_parallel_processes' in conf_samples:
+        njobs = conf_samples['number_of_parallel_processes']['value']
        
-    data = Parallel(n_jobs=60)(delayed(seed_nucleus)(n_nucleons) for i in range(n_configs))
+    data = Parallel(n_jobs=njobs)(delayed(seed_nucleus)(n_nucleons) for i in range(n_configs))
 #     data = np.zeros((n_configs,n_nucleons,N_SEEDS),dtype=np.float)
 #     for i in range(n_configs):
 #         data[i,:,:] = seed_nucleus(n_nucleons)
