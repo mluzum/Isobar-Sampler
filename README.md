@@ -2,11 +2,11 @@
 
 ## 1. Description
 
-Allows sampling isobars nuclear configurations for running initial conditions for hydrodynamic simulations of ultrarelativistic nucleus-nucleus collisions in an efficient manner. 
+Allows sampling isobaric nuclear configurations for running initial conditions for hydrodynamic simulations of ultrarelativistic nucleus-nucleus collisions in an efficient manner. 
 
-It works by creating a bank of 'seeds', random numbers that can be used to calculate nucleon positions within different nuclear structures. These seeds are then used to generate nuclear configurations, consisting of an array of shape `(number_configurations, number_nucleons, 3)`, which stores nucleon positions `{x, y, z}`, in Cartesian coordinates.  
+It works by creating a bank of 'seeds', random numbers that can be used to calculate nucleon positions within different nuclear structures. These seeds are then used to generate nuclear configurations, consisting of an array of shape `(number_configs, number_nucleons, 3)`, which stores nucleon positions `{x, y, z}`, in Cartesian coordinates.  
 
-Nuclei with arbitrary Woods-Saxon parameters (R,a), angular deformation parametrs (beta_2, gamma, beta_2), and short-range correlations (currently a step function with depth correlation_strangth and distance correlation_length), can be prepared and efficiently compared to each other.  As long as the same seeds are used, the relative difference between nuclei can be accurately studied with few statistics.
+Nuclei with arbitrary Woods-Saxon parameters (R,a), angular deformation parametrs (beta_2, gamma, beta_3), and short-range correlations (currently a step function with depth correlation_strangth and distance correlation_length), can be prepared and efficiently compared to each other.  As long as the same seeds are used, the relative difference between nuclei can be accurately studied with few statistics.
 
 Results are saved in HDF format and can be easliy used with T<sub>R</sub>ENTo.
 
@@ -30,7 +30,7 @@ isobar_seeds:
    
    number_nucleons: 
       description: Mass number A of the nuclei.
-      value: 208
+      value: 96
    
    number_configs:
       description: How many sets of nucleon positions to sample?
@@ -102,7 +102,7 @@ isobar_properties:
 (...)
 ```
 
-The output is saved in separate HDF files in the specified output path, with the same name as each of the isobars, in databases also having the same name. These databases contain an array of shape `(number_configurations, number_nucleons, 3)`, which stores nucleon positions `{x, y, z}`, in Cartesian coordinates.
+The output is saved in separate HDF files in the specified output path, with the same name as each of the isobars, in databases also having the same name. These databases contain an array of shape `(number_configs, number_nucleons, 3)`, which stores nucleon positions `{x, y, z}`, in Cartesian coordinates.
 
 ## 3. Usage with T<sub>R</sub>ENTo
 
@@ -112,7 +112,7 @@ The syntax is as follows:
 
 `trento isobar.hdf isobar.hdf --random-seed random_seed --b-max b_max [...]`
 
-where the random seed should be specified for the different isobars so T<sub>R</sub>ENTo picks corresponding configurations and applies the same random elements (impact parameter, rotations, gamma fluctautions, etc.). The maximum impact parameter must be fixed by hand as well, otherwise it will vary with the nuclei.  
+where the random seed should be specified for the different isobars so T<sub>R</sub>ENTo picks corresponding configurations and applies the same random elements (impact parameter, rotations, gamma fluctuations, etc.). The maximum impact parameter must be fixed by hand as well, otherwise it will vary with the nuclei.  
 
 
 
