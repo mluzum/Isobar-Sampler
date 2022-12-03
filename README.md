@@ -24,7 +24,7 @@ The output is saved in HDF format, in a database named `isobar_seeds`.
 
 ##### Example configuration file:
 An example configuration file can be found in `examples/seeds-conf.yaml`:
-
+```
 isobar_seeds:
    description: Configurations for making list of seeds for nucleon positions.
    
@@ -43,7 +43,7 @@ isobar_seeds:
    number_of_parallel_processes:
        description: Number of processes to compute in parallel.  
        value: 40
-...
+```
 
 
 ### 2.2. Build Nuclear Configurations
