@@ -45,23 +45,7 @@ POS_SEEDS = {'radius':0,'costheta':1,'phi':2,'gauss_x':3,'gauss_y':4,'gauss_z':5
 
 
 
-# rho'/rho for spherical Woods-Saxon
-def rhodot_over_rho(r,R,a):
-    temp = -1.
-    temp /= a
-    temp /= 1 + math.exp((R-r)/a)
-    return temp
 
-# dimension-reduced differential equation -- inhomogenious (f, fdot) and homogenious (fhomo, fhomodot)
-# returns derivative of (f, fdot, fhomo, fhomodot)
-def diff_eq(r,z,R,a,l_int,nlint=1):
-    f, fdot, fhomo, fhomodot = z
-    temp = -fdot*(2/r + rhodot_over_rho(r,R,a)*nlint)
-    temp += l_int*(l_int+1)/r**2*f
-    temp += rhodot_over_rho(r,R,a)*nlint
-    temphomo = -fhomodot*(2/r + rhodot_over_rho(r,R,a)*nlint)
-    temphomo += l_int*(l_int+1)/r**2*fhomo
-    return [fdot, temp, fhomodot, temphomo]
 
 
 # Real spherical harmonics
@@ -97,6 +81,24 @@ def Woods_Saxon(r,R,a):
 # Use mppath implementation of polylog instead of numerical integral to normalize
     norm = -8*a**3*np.pi*polylog(3,-math.exp(R/a))
     return float(Woods_Saxon_unnormalized(r,R,a)/norm)
+
+# rho'/rho for spherical Woods-Saxon
+def rhodot_over_rho(r,R,a):
+    temp = -1.
+    temp /= a
+    temp /= 1 + np.exp((R-r)/a)
+    return temp
+
+# dimension-reduced differential equation -- solve both inhomogenious (f, fdot) and homogenious (fhomo, fhomodot)
+# returns derivative of (f, fdot, fhomo, fhomodot) = (f'_I, f''_I, f'_H, f''_H)
+def diff_eq(r,z,R,a,l_int):
+    f, fdot, fhomo, fhomodot = z
+    fdot_dot = -fdot*(2/r + rhodot_over_rho(r,R,a))
+    fdot_dot += l_int*(l_int+1)/r**2*f
+    fdot_dot += rhodot_over_rho(r,R,a)
+    fhomodot_dot = -fhomodot*(2/r + rhodot_over_rho(r,R,a))
+    fhomodot_dot += l_int*(l_int+1)/r**2*fhomo
+    return [fdot, fdot_dot, fhomodot, fhomodot_dot]
 
 # Analytic form for (properly normalized) step+Gauss distribution
 def Step_Gauss(r,R_step,w):
@@ -152,13 +154,11 @@ def cartesian(r,costheta,phi):
 # consistent with step-function correlation function characterized by 
 # parameters c_strength (> -1) and c_length (in fm)
 def corr_shift(r, c_length, c_strength, avgprob):
-#     avgprob = quad(lambda r: r**2*Woods_Saxon(r,R,a)**2, 0,np.inf)[0]*4*np.pi
     Vcorr = c_strength*4*np.pi/3*c_length**3
     C_inf = -Vcorr*avgprob
 #     c_length += C_inf
 #     C_inf = 0
     dr = 0
-    # solve for rp(rsw) = c_length
     
     # shift distance r->rp, dr = rp - r
     # change in step function occurs at rp = c_length,
@@ -187,18 +187,7 @@ def add_correlations(nucleus, c_length, c_strength, avgprob):
             posB = nucleus[nucleonB]
             r_vec = posB - posA
             r = np.linalg.norm(r_vec)
-#             rA = np.linalg.norm(posA)
-#             rB = np.linalg.norm(posB)
-#             rhoA = ST(rA, 5.20678, 0.772445)
-#             rhoB = ST(rB, 5.20678, 0.772445)
-#             rA = math.sqrt(posA[0]**2 + posA[1]**2 + posA[2]**2)
-#             rB = math.sqrt(posB[0]**2 + posB[1]**2 + posB[2]**2)
-#             rhoA = Woods_Saxon(rA,5.09,0.46)
-#             rhoB = Woods_Saxon(rB,5.09,0.46)
-#             shiftA = corr_shift(r, c_length, c_strength, rhoA)
-#             shiftB = corr_shift(r, c_length, c_strength, rhoB)
-#             cumulative_shift[nucleonA] -= shiftA*rvec/r/2
-#             cumulative_shift[nucleonB] += shiftB*rvec/r/2
+
             shift_magnitude = corr_shift(r, c_length, c_strength, avgprob)
             shift = shift_magnitude*r_vec/r
             cumulative_shift[nucleonA] -= shift/2
@@ -257,10 +246,6 @@ def deform_nucleus(nucleus, R, beta2, gamma, beta3, f2, fp2,f3,fp3):
     rmin = R/10
     for nucleon, position in enumerate(nucleus):
         x,y,z = position
-#         x = nucleon[0]
-#         y = nucleon[1]
-#         z = nucleon[2]
-#         r = math.sqrt(x*x + y*y + z*z)
         r = np.linalg.norm(position)
         if r > rmin:
             phi = math.atan2(y,x)
@@ -280,7 +265,6 @@ def deform_nucleus(nucleus, R, beta2, gamma, beta3, f2, fp2,f3,fp3):
 
 
 # Place nucleons according 3D step function + 3D Gaussion, from pre-generated random seeds
-# def place_nucleon(Rws, R_step, w_gauss, beta2, gamma, beta3, seed, f2, fp2, f3, fp3):
 def place_nucleon(R_step, w_gauss, seed):    
     # radial coordinate
     radius_seed = seed[POS_SEEDS['radius']]
@@ -298,10 +282,6 @@ def place_nucleon(R_step, w_gauss, seed):
     
     x,y,z = cartesian(r,costheta,phi)
     
-#     sintheta = np.sqrt(1.-costheta**2)
-#     z = r*costheta
-#     x = r*sintheta*np.cos(phi)
-#     y = r*sintheta*np.sin(phi)
     
     # folding with 3d gaussian
     gauss_seed_x = seed[POS_SEEDS['gauss_x']]
@@ -312,23 +292,6 @@ def place_nucleon(R_step, w_gauss, seed):
     y += w_gauss*gauss_seed_y
     z += w_gauss*gauss_seed_z
     
-#     r = math.sqrt(newz**2+newx**2+newy**2)
-#     phi = math.atan2(newy,newx)
-#     costheta = newz/r
-    
-    
-# #     # deformation
-#     beta20 = beta2*math.cos(gamma)
-#     beta22 = beta2*math.sin(gamma)
-#     if (beta20 != 0 or beta22 != 0 or beta3 != 0):
-#         print(f'doing deformation, {beta20}, {beta22}, {beta3}')
-#         nsteps = 10
-#         for step in range(nsteps):
-#             r,costheta,phi = deform(r,costheta,phi,Rws,beta20/nsteps,beta22/nsteps,beta3/nsteps, f2, fp2,f3,fp3)
-
-    
-#     # cartesian coordinates
-#     x, y, z = cartesian(r,costheta,phi)
     
     return np.array([x,y,z])
 
@@ -337,12 +300,8 @@ def place_nucleon(R_step, w_gauss, seed):
 
 # Build nucleus by randomly placing nucleons independently according to a 
 # spherically-symmetric distribution, then adding angular deformation,
-# then adding short-range pair correlation.  Result is positions in cartesian coordinates.
+# then adding short-range pair correlation.  Result is list of positions in cartesian coordinates.
 def build_nucleus(seeds_nucleus, n_nucleons, R_ws, a_ws, R_step, w_gauss, beta2, gamma, beta3, c_length, c_strength, avgprob, f2, fp2, f3, fp3):
-
-#     nucleus = Parallel(n_jobs=60)(delayed(place_nucleon)(R_step, w_gauss, beta2, gamma,  beta3, seeds_nucleus[n], f2, fp2, f3, fp3) for n in range(n_nucleons))
-#     nucleus = np.array(nucleus)
-
 
     # Place nucleons via 3D step + Gaussian
     nucleus = np.zeros((n_nucleons,3))
@@ -361,7 +320,6 @@ def build_nucleus(seeds_nucleus, n_nucleons, R_ws, a_ws, R_step, w_gauss, beta2,
         
     return nucleus
 
-# def run_isobar(seeds_nucleus, n_nucleons, R_step, w_gauss, beta2, gamma, beta3):
     
 
 #%%
@@ -393,7 +351,6 @@ def main():
     isobars = []
     isobar_names = []
 
-    # print(confs.keys())
 
     while ('isobar'+str(n_isobars+1) in confs['isobar_properties'].keys()):
             isobar_conf = confs['isobar_properties']['isobar'+str(n_isobars+1)]
@@ -418,7 +375,6 @@ def main():
             isobar_names += [ isobar_conf['isobar_name'] ]
             n_isobars +=1
         
-    # print(isobar_names)
 
     
     # Prepare each isobar configuration
@@ -427,15 +383,12 @@ def main():
         print(f'Building isobar {i+1}')
         R_ws = isobars[isobar,0]
         a_ws = isobars[isobar,1]
+        R_step = isobars[isobar,2]
+        w = isobars[isobar,3]
         beta2 = isobars[isobar,4]
         gamma = isobars[isobar,5]
         beta3 = isobars[isobar,6]
-#         print(f'{beta2=}, {gamma=}, {beta3=}')
-        if (R_ws == 0 or a_ws == 0):
-            raise Exception('Need to specify WS_radius and WS_diffusiveness in input file')
         
-        R_step = isobars[isobar,2]
-        w = isobars[isobar,3]
         if R_step == 0 or w == 0:
             (R_step, w_step) = Rst_w_from_WS(R_ws,a_ws)
             isobars[isobar,2] = R_step
@@ -447,8 +400,6 @@ def main():
         # pass interpolation functions via arguments for evaluation in deform_*()
         if (beta2 != 0 or beta3 != 0):
             print(f'Solving differential equation for angular deformation.  {beta2=}, {gamma=}, {beta3=} fm')
-#             rmin = 1.0e-1
-#             rmax = 2.2*Rws
             rmin = R_ws/10
             rmax = 3*R_ws
             
@@ -471,8 +422,6 @@ def main():
             args=(R_ws,a_ws,3) # l = 3
             res3 = solve_ivp(fun=lambda t,y: diff_eq(t,y,*args), y0=z_init,t_span=[rmax, rmin],rtol=1e-10,atol=1e-10)
 
-#             f2 = interp1d(res2.t,res2.y[0] - res2.y[1,-1]/res2.y[3,-1]*res2.y[2])
-#             fp2 = interp1d(res2.t,res2.y[1] - res2.y[1,-1]/res2.y[3,-1]*res2.y[3])
             f3 = interp1d(res3.t, res3.y[0] - res3.y[1,-1]/res3.y[3,-1]*res3.y[2])
             fp3 = interp1d(res3.t, res3.y[1] - res3.y[1,-1]/res3.y[3,-1]*res3.y[3])
         else:
@@ -482,7 +431,7 @@ def main():
             fp3 = 0
         
         
-        # Required for calculation of shift due to short-range correlation.
+        # average probability required for calculation of shift due to short-range correlation.
         # For effiency, compute only once and pass the value via arguments
         correlation_length = isobars[isobar,7]
         correlation_strength = isobars[isobar,8]

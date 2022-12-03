@@ -4,9 +4,11 @@
 
 Allows sampling isobars nuclear configurations for running initial conditions for hydrodynamic simulations of ultrarelativistic nucleus-nucleus collisions in an efficient manner. 
 
-It works by creating a bank of 'seeds', random numbers that can be used to calculate nucleon positions within different nuclear structures. These seeds are then used to generate nuclear configurations, consisting of an array of shape `(number_configurations, number_nucleons, 3)`, which stores nucleon positions `{x, y, z}`, in Cartesian coordinates.
+It works by creating a bank of 'seeds', random numbers that can be used to calculate nucleon positions within different nuclear structures. These seeds are then used to generate nuclear configurations, consisting of an array of shape `(number_configurations, number_nucleons, 3)`, which stores nucleon positions `{x, y, z}`, in Cartesian coordinates.  
 
-Results are saved in HDF format and can be used with T<sub>R</sub>ENTo.
+Nuclei with arbitrary Woods-Saxon parameters (R,a), angular deformation parametrs (beta_2, gamma, beta_2), and short-range correlations (currently a step function with depth correlation_strangth and distance correlation_length), can be prepared and efficiently compared to each other.  As long as the same seeds are used, the relative difference between nuclei can be accurately studied with few statistics.
+
+Results are saved in HDF format and can be easliy used with T<sub>R</sub>ENTo.
 
 ## 2. Usage
 
@@ -103,10 +105,13 @@ The output is saved in separate HDF files in the specified output path, with the
 
 ## 3. Usage with T<sub>R</sub>ENTo
 
-These nuclear configurations can be used within T<sub>R</sub>ENTo to generate initial conditions. The syntax is as follows:
+These nuclear configurations can be used within T<sub>R</sub>ENTo to generate initial conditions. However, a  modified version of Trento (to be released in the future) is necessary to properly synchronize fluctuations across corresponding nuclei.
 
-`trento isobar.hdf isobar.hdf --random-seed random_seed [...]`
+The syntax is as follows:
 
-where the random seed should be specified for the different isobars so T<sub>R</sub>ENTo picks corresponding configurations and applies the same random rotation.
+`trento isobar.hdf isobar.hdf --random-seed random_seed --b-max b_max [...]`
+
+where the random seed should be specified for the different isobars so T<sub>R</sub>ENTo picks corresponding configurations and applies the same random elements (impact parameter, rotations, gamma fluctautions, etc.). The maximum impact parameter must be fixed by hand as well, otherwise it will vary with the nuclei.  
+
 
 
