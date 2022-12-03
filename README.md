@@ -38,6 +38,9 @@ isobar_seeds:
       description: Path where to save list of seeds for nucleon positions.
       filename: nucleon-seeds.hdf
 ```
+   number_of_parallel_processes:
+       description: Number of processes to compute in parallel.  
+       value: 40
 
 
 ### 2.2. Build Nuclear Configurations
@@ -56,31 +59,43 @@ isobar_samples:
      value: 10000
    number_nucleons: 
       description: Mass number A of the nuclei.
-      value: 208    
+      value: 96    
    seeds_file:
      description: Input file with list of seeds for nucleon positions.
      filename: nucleon-seeds.hdf
    output_path:
       description: Output directory where to save 
       dirname: test
+   number_of_parallel_processes:
+       description: Number of processes to compute in parallel. A value of -1 automatically selects the number of CPUs present.  See joblib.Parallel class.
+       value: -1
 
 isobar_properties:
    description: Nuclear properties of isobars to be sampled. Entries = isobar1, isobar2, ... Results are saved to isobar_name.hdf
    
    isobar1:
      isobar_name: WS1
-     step_radius:
-       description: Step-function radius in diffuse step function parametrization.
-       value: 5.20678
-     diffusiveness:
-       description: Gaussian blurring width in diffuse step function parametrization.
-       value: 0.772445
+     WS_radius:
+       description: Woods-Saxon radius parameter R
+       value: 5.09
+     WS_diffusiveness:
+       description: Woods-Saxon diffusiveness parameter a
+       value: 0.46
      beta_2:
        description: Quadrupolar deformation beta_2 of isobar.
-       value: 0
+       value: 0.16
+     gamma:
+       description: Quadrupolar deformation angle (in radians).
+       value: 0.5236
      beta_3:
        description: Octupolar deformation beta_3 of isobar.
        value: 0
+     correlation_length:
+       description: Radius of step-function correlation function C(r) in fm.
+       value: 0.4
+     correlation_strength:
+       description: Depth of correlation function for r < correlation_length.  Should be >= -1.
+       value: -1
 (...)
 ```
 

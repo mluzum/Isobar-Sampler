@@ -15,6 +15,6 @@ isobar_seeds:
       filename: nucleon-seeds.hdf
       
    number_of_parallel_processes:
-       description: Number of processes to compute in parallel.  
-       value: 40
+       description: Number of processes to compute in parallel. A value of -1 automatically selects the number of CPUs present.  See joblib.Parallel class. 
+       value: -1
       

@@ -4,11 +4,11 @@ isobar_samples:
       
    number_configs:
      description: Number of configurations to be sampled.
-     value: 500000
+     value: 40000
      
    number_nucleons: 
       description: Mass number A of the nuclei.
-      value: 96    
+      value: 96
    
    seeds_file:
      description: Input file with list of seeds for nucleon positions.
@@ -17,20 +17,25 @@ isobar_samples:
    output_path:
       description: Output directory where to save 
       dirname: nuclei
+      
+   number_of_parallel_processes:
+       description: Number of processes to compute in parallel. A value of -1 automatically selects the number of CPUs present.  See joblib.Parallel class.
+       value: -1
+
 
 isobar_properties:
    description: Nuclear properties of isobars to be sampled. Entries = isobar1, isobar2, ... Results are saved to isobar_name.hdf
-   
+       
    isobar1:
      isobar_name: WS1
         
-     step_radius:
-       description: Step-function radius in diffuse step function parametrization.
-       value: 5.20678
-    
-     diffusiveness:
-       description: Gaussian blurring width in diffuse step function parametrization.
-       value: 0.772445
+     WS_radius:
+       description: Woods-Saxon radius parameter R
+       value: 5.09
+
+     WS_diffusiveness:
+       description: Woods-Saxon diffusiveness parameter a
+       value: 0.46
     
      beta_2:
        description: Quadrupolar deformation beta_2 of isobar.
@@ -44,166 +49,43 @@ isobar_properties:
        description: Octupolar deformation beta_3 of isobar.
        value: 0
 
-     WS_radius:
-       description: Woods-Saxon radius parameter
-       value: 5.09
+     correlation_length:
+       description: Radius of step-function correlation function C(r) in fm.
+       value: 0.4
+    
+     correlation_strength:
+       description: Depth of correlation function for r < correlation_length.  Should be >= -1.
+       value: -1
 
-     WS_diffusiveness:
-       description: Woods-Saxon diffusiveness parameter A
-       value: 0.46
+
 
    isobar2:
      isobar_name: WS2
         
-     step_radius:
-       description: Step-function radius in diffuse step function parametrization.
-       value: 5.20678
-    
-     diffusiveness:
-       description: Gaussian blurring width in diffuse step function parametrization.
-       value: 0.772445
-    
-     beta_2:
-       description: Quadrupolar deformation beta_2 of isobar.
-       value: 0.16
-        
-     gamma:
-       description: Quadrupolar deformation angle (in radians).
-       value: 0
-        
-     beta_3:
-       description: Octupolar deformation beta_3 of isobar.
-       value: 0
-
      WS_radius:
-       description: Woods-Saxon radius parameter
-       value: 5.09
-
-     WS_diffusiveness:
-       description: Woods-Saxon diffusiveness parameter A
-       value: 0.46
-
-   isobar3:
-     isobar_name: WS3
-        
-     step_radius:
-       description: Step-function radius in diffuse step function parametrization.
-       value: 5.20678
-    
-     diffusiveness:
-       description: Gaussian blurring width in diffuse step function parametrization.
-       value: 0.772445
-    
-     beta_2:
-       description: Quadrupolar deformation beta_2 of isobar.
-       value: 0.16
-        
-     gamma:
-       description: Quadrupolar deformation angle (in radians).
-       value: 0
-        
-     beta_3:
-       description: Octupolar deformation beta_3 of isobar.
-       value: 0.20
-
-     WS_radius:
-       description: Woods-Saxon radius parameter
-       value: 5.09
-
-     WS_diffusiveness:
-       description: Woods-Saxon diffusiveness parameter A
-       value: 0.46
-
-   isobar4:
-     isobar_name: WS4
-        
-     step_radius:
-       description: Step-function radius in diffuse step function parametrization.
-       value: 5.20678
-    
-     diffusiveness:
-       description: Gaussian blurring width in diffuse step function parametrization.
-       value: 0.772445
-    
-     beta_2:
-       description: Quadrupolar deformation beta_2 of isobar.
-       value: 0.06
-        
-     gamma:
-       description: Quadrupolar deformation angle (in radians).
-       value: 0
-        
-     beta_3:
-       description: Octupolar deformation beta_3 of isobar.
-       value: 0.20
-
-     WS_radius:
-       description: Woods-Saxon radius parameter
-       value: 5.09
-
-     WS_diffusiveness:
-       description: Woods-Saxon diffusiveness parameter A
-       value: 0.46
-
-   isobar5:
-     isobar_name: WS5
-        
-     step_radius:
-       description: Step-function radius in diffuse step function parametrization.
-       value: 5.23813
-    
-     diffusiveness:
-       description: Gaussian blurring width in diffuse step function parametrization.
-       value: 0.870378
-    
-     beta_2:
-       description: Quadrupolar deformation beta_2 of isobar.
-       value: 0.06
-        
-     gamma:
-       description: Quadrupolar deformation angle (in radians).
-       value: 0
-        
-     beta_3:
-       description: Octupolar deformation beta_3 of isobar.
-       value: 0.20
-
-     WS_radius:
-       description: Woods-Saxon radius parameter
-       value: 5.09
-
-     WS_diffusiveness:
-       description: Woods-Saxon diffusiveness parameter A
-       value: 0.52
-
-   isobar6:
-     isobar_name: WS6
-        
-     step_radius:
-       description: Step-function radius in diffuse step function parametrization.
-       value: 5.17005
-    
-     diffusiveness:
-       description: Gaussian blurring width in diffuse step function parametrization.
-       value: 0.870012
-    
-     beta_2:
-       description: Quadrupolar deformation beta_2 of isobar.
-       value: 0.06
-        
-     gamma:
-       description: Quadrupolar deformation angle (in radians).
-       value: 0
-        
-     beta_3:
-       description: Octupolar deformation beta_3 of isobar.
-       value: 0.20
-
-     WS_radius:
-       description: Woods-Saxon radius parameter
+       description: Woods-Saxon radius parameter R
        value: 5.02
 
      WS_diffusiveness:
-       description: Woods-Saxon diffusiveness parameter A
+       description: Woods-Saxon diffusiveness parameter a
        value: 0.52
+    
+     beta_2:
+       description: Quadrupolar deformation beta_2 of isobar.
+       value: 0.06
 
+     gamma:
+       description: Quadrupolar deformation angle (in radians).
+       value: 0
+        
+     beta_3:
+       description: Octupolar deformation beta_3 of isobar.
+       value: 0.2
+
+     correlation_length:
+       description: Radius of step-function correlation function C(r) in fm.
+       value: 0.4
+    
+     correlation_strength:
+       description: Depth of correlation function for r < correlation_length.  Should be >= -1.
+       value: -1
