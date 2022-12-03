@@ -43,6 +43,7 @@ isobar_seeds:
    number_of_parallel_processes:
        description: Number of processes to compute in parallel.  
        value: 40
+...
 
 
 ### 2.2. Build Nuclear Configurations
