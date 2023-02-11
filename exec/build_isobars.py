@@ -202,7 +202,7 @@ def add_correlations(nucleus, c_length, c_strength, avgprob):
 # def deform(r,costheta,phi,Rws,Rstep, w,beta20,beta22,beta3, f2, fp2,f3,fp3):
 def deform_nucleon(r,costheta,phi,R,beta20,beta22,beta3, f2, fp2,f3,fp3):
 #     beta20 = b2*math.cos(gamma)
-#     beta22 = b2*math.sin(gamma)
+#     beta22 = b2*math.sin(gamma)/np.sqrt(2)
     theta = np.arccos(costheta)
     dtheta=0
     dphi = 0
@@ -252,7 +252,7 @@ def deform_nucleus(nucleus, R, beta2, gamma, beta3, f2, fp2,f3,fp3):
             costheta = z/r
 
             beta20 = beta2*math.cos(gamma)
-            beta22 = beta2*math.sin(gamma)
+            beta22 = beta2*math.sin(gamma)/np.sqrt(2)
 
             nsteps = 10
             for step in range(nsteps):
