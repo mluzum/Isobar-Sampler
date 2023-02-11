@@ -18,6 +18,8 @@ import yaml
 import numpy.random as random
 from yaml.loader import SafeLoader
 
+from joblib import Parallel, delayed
+
 N_SEEDS = 3 + 3 # 3 for r, theta, phi + 3 for delta_{x,y,z} Gaussian
 POS_SEEDS = {'radius':0,'costheta':1,'phi':2,'gauss_x':3,'gauss_y':4,'gauss_z':5 }
 GAUSS_SEEDS = ['gauss_x','gauss_y','gauss_z'] # Gaussian seeds
@@ -63,10 +65,14 @@ def main():
     n_configs = conf_seed['number_configs']['value']
     n_nucleons = conf_seed['number_nucleons']['value']
     out_file = conf_seed['output_file']['filename']
+    njobs = 1  # default to serial calculation
+    if 'number_of_parallel_processes' in conf_samples:
+        njobs = conf_samples['number_of_parallel_processes']['value']
        
-    data = np.zeros((n_configs,n_nucleons,N_SEEDS),dtype=np.float)
-    for i in range(n_configs):
-        data[i,:,:] = seed_nucleus(n_nucleons)
+    data = Parallel(n_jobs=njobs)(delayed(seed_nucleus)(n_nucleons) for i in range(n_configs))
+#     data = np.zeros((n_configs,n_nucleons,N_SEEDS),dtype=np.float)
+#     for i in range(n_configs):
+#         data[i,:,:] = seed_nucleus(n_nucleons)
 
     with h5py.File(out_file, 'w') as f:
         data_set = f.create_dataset('isobar_seeds',(n_configs,n_nucleons,N_SEEDS))

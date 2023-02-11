@@ -4,13 +4,17 @@ isobar_seeds:
    
    number_nucleons: 
       description: Mass number A of the nuclei.
-      value: 208
+      value: 96
    
    number_configs:
       description: How many sets of nucleon positions to sample?
-      value: 10000
+      value: 100000
          
    output_file:
       description: Path where to save list of seeds for nucleon positions.
       filename: nucleon-seeds.hdf
+      
+   number_of_parallel_processes:
+       description: Number of processes to compute in parallel. A value of -1 automatically selects the number of CPUs present.  See joblib.Parallel class. 
+       value: -1
       
