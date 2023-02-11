@@ -164,7 +164,7 @@ def corr_shift(r, c_length, c_strength, avgprob):
     # change in step function occurs at rp = c_length,
     # or r = r_sw:
     r_sw = c_length*(1 + C_inf + c_strength)**(1/3)
-    if r < rsw:
+    if r < r_sw:
         rp3 = r**3
         rp3 /= 1 + c_strength + C_inf
         rp = rp3**(1/3)
@@ -380,7 +380,7 @@ def main():
     # Prepare each isobar configuration
     isobars = np.array(isobars)
     for isobar in range(n_isobars):
-        print(f'Building isobar {i+1}')
+        print(f'Building isobar {isobar+1}')
         R_ws = isobars[isobar,0]
         a_ws = isobars[isobar,1]
         R_step = isobars[isobar,2]
