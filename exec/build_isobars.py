@@ -18,6 +18,12 @@ import sys
 import os
 import yaml
 import math
+
+import pickle
+from scipy.optimize import fsolve
+
+# from scipy import interpolate
+
 # import numpy.random as random
 from yaml.loader import SafeLoader
 from scipy.integrate import quad
@@ -28,6 +34,8 @@ from scipy.interpolate import interp1d
 from scipy.integrate import solve_ivp
 from scipy.optimize import minimize
 from mpmath import polylog
+
+
 
 # import copy
 
@@ -150,10 +158,20 @@ def cartesian(r,costheta,phi):
     return x, y, z
 #%% 
 
+# def corr_shift_realistic(r, c_volume, c_extremum, integrated_correlation):
+#     func = lambda rtilde: integrated_correlation(rtilde) (rtilde**3)/3 - (r**3)/3
+#     return fsolve(func, r) - r
+def corr_shift_realistic(r, integrated_correlation, strength_scale, r_scale, avgprob):
+    func = lambda rtilde: r_scale**3*strength_scale*integrated_correlation(rtilde/r_scale) + (1 + 0.16*r_scale**3*strength_scale*avgprob)*(rtilde**3) - (r**3)
+#     func = lambda rtilde: strength_scale*integrated_correlation(rtilde/r_scale) + (1 + 0.16*r_scale**3*strength_scale*avgprob)*(rtilde**3) - (r**3)
+    return fsolve(func, r + 0.5) - r
+    
+
+
 # Compute magnitude of the coordinate shift of a pair of nucleons 
 # consistent with step-function correlation function characterized by 
 # parameters c_strength (> -1) and c_length (in fm)
-def corr_shift(r, c_length, c_strength, avgprob):
+def corr_shift_step(r, c_length, c_strength, avgprob):
     Vcorr = c_strength*4*np.pi/3*c_length**3
     C_inf = -Vcorr*avgprob
 #     c_length += C_inf
@@ -178,7 +196,43 @@ def corr_shift(r, c_length, c_strength, avgprob):
         
     
 # Add correlations to a nucleus by shifting nucleon positions
-def add_correlations(nucleus, c_length, c_strength, avgprob):
+def add_correlations_realistic(nucleus, c_volume, c_extremum, corr_shift_interp):
+    # Read integrated correlation function computed numerically from Monte Carlo configurations
+    # (\int dr r^2 C(r))/(4\pi)
+    # Corresponds to reference https://doi.org/10.1103/PhysRevC.101.061901
+#     integrated_correlation_list = np.load('Ru_integrated_correlation.npy')
+#     nrbins = 125
+#     rmax = 2.5
+#     rbins = np.linspace(0,rmax,nrbins)
+#     deltar = rmax/nrbins
+#     rlist=np.linspace(deltar/2,rmax,nrbins-1)
+#     # Interpolate as a function of r
+#     integrated_correlation = interp1d(np.insert(rlist,0,0), np.insert([sum(integrated_correlation_list[:i+1]) for i in range(len(rlist))],0,0), bounds_error=False, fill_value=(0,sum(integrated_correlation_list)))
+#     extremum_reference = -1
+#     strength_scale = c_extremum/extremum_reference
+#     C_vol_reference = -0.16*strength_scale
+# #     C_vol_reference = -0.0509*strength_scale
+#     C_vol_scale = c_volume/C_vol_reference
+#     r_scale = C_vol_scale**(1/3.)
+
+    # Shift position of nucleons
+    A = len(nucleus)
+    cumulative_shift = np.zeros((A,3))
+    for nucleonA in range(A-1):
+        posA = nucleus[nucleonA]
+        for nucleonB in range(nucleonA+1,A):
+            posB = nucleus[nucleonB]
+            r_vec = posB - posA
+            r = np.linalg.norm(r_vec)
+#             shift_magnitude = corr_shift_realistic(r, integrated_correlation, strength_scale, r_scale, avgprob)
+            shift_magnitude = corr_shift_interp(r)
+            shift = shift_magnitude*r_vec/r
+            cumulative_shift[nucleonA] -= shift/2
+            cumulative_shift[nucleonB] += shift/2
+#             cumulative_shift[nucleonA] -= shift
+    return nucleus + cumulative_shift
+
+def add_correlations_step(nucleus, c_length, c_strength, avgprob):
     A = len(nucleus)
     cumulative_shift = np.zeros((A,3))
     for nucleonA in range(A-1):
@@ -188,7 +242,7 @@ def add_correlations(nucleus, c_length, c_strength, avgprob):
             r_vec = posB - posA
             r = np.linalg.norm(r_vec)
 
-            shift_magnitude = corr_shift(r, c_length, c_strength, avgprob)
+            shift_magnitude = corr_shift_step(r, c_length, c_strength, avgprob)
             shift = shift_magnitude*r_vec/r
             cumulative_shift[nucleonA] -= shift/2
             cumulative_shift[nucleonB] += shift/2
@@ -301,7 +355,7 @@ def place_nucleon(R_step, w_gauss, seed):
 # Build nucleus by randomly placing nucleons independently according to a 
 # spherically-symmetric distribution, then adding angular deformation,
 # then adding short-range pair correlation.  Result is list of positions in cartesian coordinates.
-def build_nucleus(seeds_nucleus, n_nucleons, R_ws, a_ws, R_step, w_gauss, beta2, gamma, beta3, c_length, c_strength, avgprob, f2, fp2, f3, fp3):
+def build_nucleus(seeds_nucleus, n_nucleons, R_ws, a_ws, R_step, w_gauss, beta2, gamma, beta3, c_volume, c_extremum, realistic_correlation, avgprob, f2, fp2, f3, fp3, corr_shift_interp):
 
     # Place nucleons via 3D step + Gaussian
     nucleus = np.zeros((n_nucleons,3))
@@ -315,8 +369,34 @@ def build_nucleus(seeds_nucleus, n_nucleons, R_ws, a_ws, R_step, w_gauss, beta2,
         
 
     # Add short-range correlations by shifting nucleon positions
-    if c_length !=0:
-        nucleus = add_correlations(nucleus, c_length, c_strength, avgprob)
+    if c_volume != 0:
+#         print('test2')
+        if realistic_correlation == 1:
+#             integrated_correlation_list = np.load('Ru_integrated_correlation.npy')
+#             nrbins = 125
+#             rmax = 2.5
+#             rbins = np.linspace(0,rmax,nrbins)
+#             deltar = rmax/nrbins
+#             rlist=np.linspace(deltar/2,rmax,nrbins-1)
+#             # Interpolate as a function of r
+#             integrated_correlation = interp1d(np.insert(rlist,0,0), np.insert([sum(integrated_correlation_list[:i+1]) for i in range(len(rlist))],0,0), bounds_error=False, fill_value=(0,sum(integrated_correlation_list)))
+#             extremum_reference = -1
+#             strength_scale = c_extremum/extremum_reference
+#             C_vol_reference = -0.16*strength_scale
+#         #     C_vol_reference = -0.0509*strength_scale
+#             C_vol_scale = c_volume/C_vol_reference
+#             r_scale = C_vol_scale**(1/3.)
+#             rfullmax = 3*R_ws
+#             nrfullpoints = 10000
+#             rfulllist = np.linspace(0,rfullmax,nrfullpoints)
+#             correlation_shift_list = np.array([corr_shift_realistic(r, integrated_correlation, strength_scale, r_scale, avgprob) for r in rfulllist])
+# #             print('rfulllist length = ' + str(rfulllist.shape) + ', correlation_shift_list length = ' + str(correlation_shift_list[:,0].shape))
+#             corr_shift_interp = interp1d(rfulllist, correlation_shift_list[:,0], bounds_error=False, fill_value = (0, correlation_shift_list[-1]))
+            nucleus = add_correlations_realistic(nucleus, c_volume, c_extremum, corr_shift_interp)
+        else:
+            c_strength = c_extremum
+            c_length = (abs(c_volume)*3/4/np.pi)**(1/3.)
+            nucleus = add_correlations_step(nucleus, c_length, c_strength, avgprob)
         
     return nucleus
 
@@ -365,13 +445,39 @@ def main():
             beta3 = isobar_conf['beta_3']['value']
             R_ws = isobar_conf['WS_radius']['value']
             a_ws = isobar_conf['WS_diffusiveness']['value']
-            correlation_length = 0
-            if 'correlation_length' in isobar_conf:
-                correlation_length = isobar_conf['correlation_length']['value']
+            realistic_correlation = 0
+            if 'realistic_correlation' in isobar_conf:
+#                 print('I see the config file')
+                realistic_correlation = 1
+#                 print(f'{realistic_correlation=}')
+            correlation_volume = 0
+            correlation_extremum = 0
+            if 'correlation_volume' in isobar_conf:
+                correlation_volume = isobar_conf['correlation_volume']['value']
+            if 'correlation_extremum' in isobar_conf:
+                correlation_extremum = isobar_conf['correlation_extremum']['value']
             correlation_strength = 0
+            correlation_length = 0
             if 'correlation_strength' in isobar_conf:
                 correlation_strength = isobar_conf['correlation_strength']['value']
-            isobars += [ [R_ws,a_ws,R_step,diffusiveness,beta2,gamma,beta3, correlation_length, correlation_strength] ]
+                if correlation_extremum !=0:
+                    Print("Both correlation_extremum and correlation_strength specified.  Ignoring correlation_strength.")
+                else:
+                    correlation_extremum = correlation_strength
+#                 correlation_length = (correlation_volume/correlation_strength)**(1/3)/np.pi
+            if 'correlation_length' in isobar_conf:
+                if correlation_volume != 0:
+                    Print("Both correlation_volume and correlation_length specified.  Ignoring correlation_length.")
+                else:
+                    correlation_length = isobar_conf['correlation_length']['value']
+                    correlation_volume = np.pi*correlation_strength*correlation_length**3*4/3
+            
+            
+            if (correlation_extremum < -1):
+                raise Exception('correlation_extremum/correlation_strength cannot be smaller than -1')
+                    
+#             print(f'{realistic_correlation=}') 
+            isobars += [ [R_ws,a_ws,R_step,diffusiveness,beta2,gamma,beta3, correlation_volume, correlation_extremum, realistic_correlation] ]
             isobar_names += [ isobar_conf['isobar_name'] ]
             n_isobars +=1
         
@@ -388,6 +494,8 @@ def main():
         beta2 = isobars[isobar,4]
         gamma = isobars[isobar,5]
         beta3 = isobars[isobar,6]
+        realistic_correlation = isobars[isobar,9]
+#         print(f'{realistic_correlation=}')
         
         if R_step == 0 or w == 0:
             (R_step, w_step) = Rst_w_from_WS(R_ws,a_ws)
@@ -429,23 +537,56 @@ def main():
             fp2 = 0
             f3 = 0
             fp3 = 0
-        
-        
+
+
+        correlation_volume = isobars[isobar,7]
+        correlation_extremum = isobars[isobar,8]
+#         realistic_correlation = isobars[isobar,9]
+        avgprob = 0
+#         print(f'{realistic_correlation=}')
+        corr_shift_interp = 0
+        if correlation_volume != 0:
+#         Prepare correlation
         # average probability required for calculation of shift due to short-range correlation.
         # For effiency, compute only once and pass the value via arguments
-        correlation_length = isobars[isobar,7]
-        correlation_strength = isobars[isobar,8]
-        avgprob = 0
-        if (correlation_strength < -1):
-            raise Exception('correlation_strength cannot be smaller than -1')
-        if correlation_strength !=0:
-            print(f'Nontrivial correlation selected.  {correlation_strength=}, {correlation_length=} fm')
+            if (correlation_extremum < -1):
+                raise Exception('correlation_extremum cannot be smaller than -1')
             avgprob = quad(lambda r: r**2*Woods_Saxon(r,R_ws,a_ws)**2, 0,np.inf)[0]*4*np.pi
+            # Realistic correlation means correlation function that matches 2-body correlation of Alvioli, Strikman, et al
+            # Otherwise, a simple step function is used
+            if realistic_correlation == 1:
+#                 print('test')
+                print(f'Realistic correlation selected.  {correlation_volume=} fm^3, {correlation_extremum=}')
+                integrated_correlation_list = np.load('Ru_integrated_correlation.npy')
+                nrbins = 125
+                rmax = 2.5
+                rbins = np.linspace(0,rmax,nrbins)
+                deltar = rmax/nrbins
+                rlist=np.linspace(deltar/2,rmax,nrbins-1)
+                # Interpolate as a function of r
+                integrated_correlation = interp1d(np.insert(rlist,0,0), np.insert([sum(integrated_correlation_list[:i+1]) for i in range(len(rlist))],0,0), bounds_error=False, fill_value=(0,sum(integrated_correlation_list)))
+                extremum_reference = -1
+                strength_scale = correlation_extremum/extremum_reference
+                C_vol_reference = -0.16*strength_scale
+            #     C_vol_reference = -0.0509*strength_scale
+                C_vol_scale = correlation_volume/C_vol_reference
+                r_scale = C_vol_scale**(1/3.)
+                rfullmax = 3*R_ws
+                nrfullpoints = 1000
+                rfulllist = np.linspace(0,rfullmax,nrfullpoints)
+                correlation_shift_list = np.array([corr_shift_realistic(r, integrated_correlation, strength_scale, r_scale, avgprob) for r in rfulllist])
+                corr_shift_interp = interp1d(rfulllist, correlation_shift_list[:,0], bounds_error=False, fill_value = (0, correlation_shift_list[-1]))
+            else:
+                correlation_strength = correlation_extremum
+                correlation_length = (abs(correlation_volume)*3/4/np.pi)**(1/3.)
+                print(f'Step-function correlation selected.  {correlation_strength=}, {correlation_length=} fm')
+#                 avgprob = quad(lambda r: r**2*Woods_Saxon(r,R_ws,a_ws)**2, 0,np.inf)[0]*4*np.pi
 
 #         data = np.zeros((n_configs,n_nucleons,3),dtype=np.float)
 #         njobs = 60
 #         njobs = -1
-        data = Parallel(n_jobs=njobs)(delayed(build_nucleus)(seeds[s],n_nucleons,*isobars[isobar],avgprob,f2,fp2,f3,fp3) for s in range(n_configs))
+#         print('building nuclei')
+        data = Parallel(n_jobs=njobs)(delayed(build_nucleus)(seeds[s],n_nucleons,*isobars[isobar],avgprob,f2,fp2,f3,fp3, corr_shift_interp) for s in range(n_configs))
 #         for s in range(n_configs):
 #             data[s,:,:] = build_nucleus(seeds[s],n_nucleons,*isobars[isobar],f2,fp2,f3,fp3)
     
