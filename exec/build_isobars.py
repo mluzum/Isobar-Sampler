@@ -567,7 +567,8 @@ def main():
                 integrated_correlation = interp1d(np.insert(rlist,0,0), np.insert([sum(integrated_correlation_list[:i+1]) for i in range(len(rlist))],0,0), bounds_error=False, fill_value=(0,sum(integrated_correlation_list)))
                 extremum_reference = -1
                 strength_scale = correlation_extremum/extremum_reference
-                C_vol_reference = -0.16*strength_scale
+#                 C_vol_reference = -0.16*strength_scale
+                C_vol_reference = -0.213*strength_scale
             #     C_vol_reference = -0.0509*strength_scale
                 C_vol_scale = correlation_volume/C_vol_reference
                 r_scale = C_vol_scale**(1/3.)
