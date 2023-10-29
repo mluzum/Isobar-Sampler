@@ -1,5 +1,7 @@
 # Isobar Sampler
 
+The official version of this code is available at <https://github.com/mluzum/Isobar-Sampler>.
+
 ## 1. Description
 
 Allows sampling isobaric nuclear configurations for running initial conditions for hydrodynamic simulations of ultrarelativistic nucleus-nucleus collisions in an efficient manner. 
