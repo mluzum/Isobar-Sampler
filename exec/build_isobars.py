@@ -466,6 +466,9 @@ def main():
                 realistic_correlation = isobar_conf['realistic_correlation']['value']
 #                 print(f'{realistic_correlation=}')
             if realistic_correlation != 0:
+                integrated_correlation_file = 'correlation_files/Ru_integrated_correlation.npy'
+                if 'integrated_correlation_file' in isobar_conf:
+                    integrated_correlation_file = isobar_conf['integrated_correlation_file']['value']
                 extremum_reference = -1
                 strength_scale = correlation_extremum/extremum_reference
                 # print(f'{strength_scale=}, {correlation_extremum=}, {extremum_reference=}')
@@ -580,7 +583,7 @@ def main():
 #                 print('test')
                 # print(f'Realistic correlation selected.  {correlation_volume=} fm^3, {correlation_extremum=}')
                 # print(f'Realistic correlation selected.  {length_scale=}, {strength_scale=}')
-                integrated_correlation_list = np.load('Ru_integrated_correlation.npy')
+                integrated_correlation_list = np.load(integrated_correlation_file)
                 nrbins = 125
                 rmax = 2.5
                 rbins = np.linspace(0,rmax,nrbins)
