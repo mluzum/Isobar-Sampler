@@ -187,7 +187,7 @@ def cartesian(r,costheta,phi):
 #     func = lambda rtilde: integrated_correlation(rtilde) (rtilde**3)/3 - (r**3)/3
 #     return fsolve(func, r) - r
 def corr_shift_realistic(r, integrated_correlation, strength_scale, length_scale, avgprob):
-    func = lambda rtilde: length_scale**3*strength_scale*integrated_correlation(rtilde/length_scale) + (1 + 0.16*length_scale**3*strength_scale*avgprob)*(rtilde**3) - (r**3)
+    func = lambda rtilde: length_scale**3*strength_scale*integrated_correlation(rtilde/length_scale)*3/4/np.pi + (1 + 0.16*length_scale**3*strength_scale*avgprob)*(rtilde**3) - (r**3)
 #     func = lambda rtilde: strength_scale*integrated_correlation(rtilde/length_scale) + (1 + 0.16*length_scale**3*strength_scale*avgprob)*(rtilde**3) - (r**3)
     return fsolve(func, r + 0.5) - r
     # return brentq(func, 0, r+10) - r
@@ -415,11 +415,12 @@ def build_nucleus(seeds_nucleus, n_nucleons, R_ws, a_ws, R_step, w_gauss, beta2,
 #%%
 def main():
     
-    # Read parameter file containing all isobar configurations
+    # Read parameter file containing settings and all isobar configurations
     conffile = sys.argv[1]
     with open(conffile, 'r') as stream:
         confs = yaml.load(stream,Loader=SafeLoader)
 
+    # Read meta settings, applicable to all isobar configurations.  Currently, all nuclei must have the same number of nucleons.
     conf_samples = confs['isobar_samples']
     n_configs = conf_samples['number_configs']['value']
     n_nucleons = conf_samples['number_nucleons']['value']
@@ -441,22 +442,30 @@ def main():
     isobars = []
     isobar_names = []
 
-    # Pre-process parameters for each isobar configuration
+    # Read and pre-process parameters for each isobar configuration
     while ('isobar'+str(n_isobars+1) in confs['isobar_properties'].keys()):
             isobar_conf = confs['isobar_properties']['isobar'+str(n_isobars+1)]
+
+            # Radius and skin thickness parameters
+            # Woods-Saxon
+            R_ws = isobar_conf['WS_radius']['value']
+            a_ws = isobar_conf['WS_diffusiveness']['value']
+            # or step+Gauss function
             R_step = 0
             if 'step_radius' in isobar_conf:
                 R_step = isobar_conf['step_radius']['value']
             diffusiveness = 0
             if 'step_diffusiveness' in isobar_conf:
                 diffusiveness = isobar_conf['step_diffusiveness']['value']
+            
+            # Angular deformation parameters
             beta2 = isobar_conf['beta_2']['value']
             gamma = isobar_conf['gamma']['value']
             beta3 = isobar_conf['beta_3']['value']
-            R_ws = isobar_conf['WS_radius']['value']
-            a_ws = isobar_conf['WS_diffusiveness']['value']
-            correlation_volume = 0
-            correlation_extremum = -1
+
+            # Short-range correlation parameters
+            correlation_volume = 0 # volume of desired correlation \int dr r^2 C(r)
+            correlation_extremum = -1 # minimum (if negative) or maximum (if positive) of desired correlation
             if 'correlation_volume' in isobar_conf:
                 correlation_volume = isobar_conf['correlation_volume']['value']
             if 'correlation_extremum' in isobar_conf:
@@ -465,11 +474,14 @@ def main():
             if 'realistic_correlation' in isobar_conf:
                 realistic_correlation = isobar_conf['realistic_correlation']['value']
 #                 print(f'{realistic_correlation=}')
-            if realistic_correlation != 0:
-                integrated_correlation_file = 'correlation_files/Ru_integrated_correlation.npy'
-                if 'integrated_correlation_file' in isobar_conf:
-                    integrated_correlation_file = isobar_conf['integrated_correlation_file']['value']
-                extremum_reference = -1
+            if realistic_correlation != 0: # correlation from Alvioli, et al. sampled Ru nuclei
+                # Read previously-extracted, binned correlation from Monte Carlo configurations C(r)
+                correlation_file = 'correlation_files/Ru_correlation_Alvioli.npy'
+                if 'correlation_file' in isobar_conf:
+                    correlation_file = isobar_conf['correlation_file']['value']
+                
+                # Can modify correlation function by scaling length or magnitude
+                extremum_reference = -1 # minimum of original correlation
                 strength_scale = correlation_extremum/extremum_reference
                 # print(f'{strength_scale=}, {correlation_extremum=}, {extremum_reference=}')
                 if 'strength_scale' in isobar_conf:
@@ -571,26 +583,27 @@ def main():
 #         Prepare correlation
         correlation_volume = isobars[isobar,7]
         correlation_extremum = isobars[isobar,8]
-        avgprob = 0
-        corr_shift_interp = 0
-        if correlation_volume != 0:
-        # average probability, required for calculation of shift due to short-range correlation.
+        # average probability <\rho> = \int d^3r \rho^2, required for calculation of shift due to short-range correlation.
         # For effiency, compute only once and pass the value via arguments
-            avgprob = quad(lambda r: r**2*Woods_Saxon(r,R_ws,a_ws)**2, 0,np.inf)[0]*4*np.pi
+        avgprob = quad(lambda r: r**2*Woods_Saxon(r,R_ws,a_ws)**2, 0,np.inf)[0]*4*np.pi
+        corr_shift_interp = 0 #only needed for realistic correlation
+        if correlation_volume != 0:
             # Realistic correlation means correlation function that matches 2-body correlation of Alvioli, Strikman, et al
             # Otherwise, a simple step function is used
             if realistic_correlation == 1:
-#                 print('test')
-                # print(f'Realistic correlation selected.  {correlation_volume=} fm^3, {correlation_extremum=}')
-                # print(f'Realistic correlation selected.  {length_scale=}, {strength_scale=}')
-                integrated_correlation_list = np.load(integrated_correlation_file)
+                correlation_list = np.load(correlation_file)
+                # binning that was used to generate correlation_file
                 nrbins = 125
                 rmax = 2.5
                 rbins = np.linspace(0,rmax,nrbins)
                 deltar = rmax/nrbins
                 rlist=np.linspace(deltar/2,rmax,nrbins-1)
-                # Interpolate as a function of r
-                integrated_correlation = interp1d(np.insert(rlist,0,0), np.insert([sum(integrated_correlation_list[:i+1]) for i in range(len(rlist))],0,0), bounds_error=False, fill_value=(0,sum(integrated_correlation_list)))
+                dr3 = [rbins[i]**3-rbins[i-1]**3 for i in range(1,len(rbins))]
+                d3rcorrelation_list = dr3*correlation_list
+                d3rcorrelation_list *= 4/3*np.pi
+                # Interpolate integral \int_0^r d(r^3) C(r) as a function of r
+                # integrated_correlation = interp1d(np.insert(rlist,0,0), np.insert([sum((d3r*correlation_list)[:i+1]) for i in range(len(rlist))],0,0), bounds_error=False, fill_value=(0,sum(correlation_list)))
+                integrated_correlation = interp1d(np.insert(rlist,0,0), np.insert([sum((d3rcorrelation_list)[:i+1]) for i in range(len(rlist))],0,0), bounds_error=False, fill_value=(0,sum(correlation_list)))
                 extremum_reference = -1
                 strength_scale = correlation_extremum/extremum_reference
 # #                 C_vol_reference = -0.16*strength_scale
