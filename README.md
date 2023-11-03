@@ -10,13 +10,13 @@ The method is described in the article [Eur.Phys.J.A 59 (2023) 5, 110](https://l
 
 It works by creating a bank of 'seeds', random numbers that can be used to calculate nucleon positions within different nuclear structures. These seeds are then used to generate nuclear configurations, consisting of an array of shape `(number_configs, number_nucleons, 3)`, which stores nucleon positions `{x, y, z}`, in Cartesian coordinates.  
 
-Nuclei with arbitrary Woods-Saxon parameters (R,a), angular deformation parametrs (beta_2, gamma, beta_3), and short-range correlations (currently either a step function with depth correlation_strangth and distance correlation_length or a realistic correlation function that can be scaled with a length_scale and/or strength_scale), can be prepared and efficiently compared to each other.  As long as the same seeds are used, the relative difference between nuclei can be accurately studied with few statistics.
+Nuclei with arbitrary Woods-Saxon parameters (R,a), angular deformation parameters (beta_2, gamma, beta_3), and short-range correlations (currently either a step function with depth correlation_strangth and distance correlation_length or a realistic correlation function that can be scaled with a length_scale and/or strength_scale), can be prepared and efficiently compared to each other.  As long as the same seeds are used, the relative difference between nuclei can be accurately studied with few statistics.
 
 Results are saved in HDF format and can be easily used, e.g., with T<sub>R</sub>ENTo.  (Note that T<sub>R</sub>ENTo must be modified to ensure synchronization of fluctuations beyond the nuclear configuration -- impact parameter, target/projectile orientation, gamma fluctautions, etc.  Such a modified version of T<sub>R</sub>ENTo will be released in the future.)
 
 ## 2. Usage
 
-The code works in two stages. 
+The code works in two stages. First a bank of 'seeds' is created and written to a file.  These seeds represent fluctuations in nucleon positions, and can be then  used to generate configurations with different nuclear shape and correlation properties ('isobars'), but which in a sense share the same respective fluctuations.   The same seed file can be used to generate additional compatible isobars in the future.
 
 ### 2.1. Create Seeds
 
@@ -103,6 +103,9 @@ isobar_properties:
      correlation_strength:
        description: Depth of correlation function for r < correlation_length.  Should be >= -1.
        value: -1
+
+   isobar2:
+     isobar_name: WS2
 (...)
 ```
 

@@ -417,23 +417,47 @@ def main():
     
     # Read parameter file containing settings and all isobar configurations
     conffile = sys.argv[1]
-    with open(conffile, 'r') as stream:
-        confs = yaml.load(stream,Loader=SafeLoader)
+    try:
+        with open(conffile, 'r') as stream:
+            confs = yaml.load(stream, Loader=SafeLoader)
+    except IOError:
+        print(f"Error: Could not read file {conffile}")
+        sys.exit(1)
+    # with open(conffile, 'r') as stream:
+    #     confs = yaml.load(stream,Loader=SafeLoader)
 
     # Read meta settings, applicable to all isobar configurations.  Currently, all nuclei must have the same number of nucleons.
-    conf_samples = confs['isobar_samples']
-    n_configs = conf_samples['number_configs']['value']
-    n_nucleons = conf_samples['number_nucleons']['value']
-    seeds_file = conf_samples['seeds_file']['filename']
-    out_dir = conf_samples['output_path']['dirname']
+    try:
+        conf_samples = confs['isobar_samples']
+        n_configs = conf_samples['number_configs']['value']
+        n_nucleons = conf_samples['number_nucleons']['value']
+        seeds_file = conf_samples['seeds_file']['filename']
+        out_dir = conf_samples['output_path']['dirname']
+        # njobs = 1  # default to serial calculation
+        # if 'number_of_parallel_processes' in conf_samples:
+        #     njobs = conf_samples['number_of_parallel_processes']['value']
+        # if(not os.path.isdir(out_dir)):
+        #     os.mkdir(out_dir)
+    except IOError:
+        print(f"Error: Missing key in configuration file: {e}")
+        sys.exit(1)
+    # conf_samples = confs['isobar_samples']
+    # n_configs = conf_samples['number_configs']['value']
+    # n_nucleons = conf_samples['number_nucleons']['value']
+    # seeds_file = conf_samples['seeds_file']['filename']
+    # out_dir = conf_samples['output_path']['dirname']
     njobs = 1  # default to serial calculation
     if 'number_of_parallel_processes' in conf_samples:
         njobs = conf_samples['number_of_parallel_processes']['value']
     if(not os.path.isdir(out_dir)):
         os.mkdir(out_dir)
     
-    with h5py.File(seeds_file, 'r') as f:
-        seeds = f['isobar_seeds'][:,:,:]
+    try:
+        with h5py.File(seeds_file, 'r') as f:
+            seeds = f['isobar_seeds'][:,:,:]
+    except IOError:
+        print(f"Error: Could not read file {seeds_file}")
+        sys.exit(1)
 
     if seeds.shape[0] < n_configs:
         n_configs = seeds.shape[0]
@@ -446,10 +470,20 @@ def main():
     while ('isobar'+str(n_isobars+1) in confs['isobar_properties'].keys()):
             isobar_conf = confs['isobar_properties']['isobar'+str(n_isobars+1)]
 
+            # Default values for all parameters, if they don't appear in the input file
+            beta2, gamma, beta3 = 0, 0, 0 # angular deformation parameters
+            realistic_correlation = 0 # 1 if using realistic correlation, 0 if using step function
+            correlation_volume = 0 # volume of desired correlation \int dr r^2 C(r)
+            correlation_extremum = -1 # minimum (if negative) or maximum (if positive) of desired correlation
+            
             # Radius and skin thickness parameters
             # Woods-Saxon
-            R_ws = isobar_conf['WS_radius']['value']
-            a_ws = isobar_conf['WS_diffusiveness']['value']
+            try:
+                R_ws = isobar_conf['WS_radius']['value']
+                a_ws = isobar_conf['WS_diffusiveness']['value']
+            except IOError:
+                print(f"Error: Missing WS_radius or WS_diffusiveness in isobar: {e}")
+                sys.exit(1)
             # or step+Gauss function
             R_step = 0
             if 'step_radius' in isobar_conf:
@@ -459,18 +493,23 @@ def main():
                 diffusiveness = isobar_conf['step_diffusiveness']['value']
             
             # Angular deformation parameters
-            beta2 = isobar_conf['beta_2']['value']
-            gamma = isobar_conf['gamma']['value']
-            beta3 = isobar_conf['beta_3']['value']
+            # beta2, gamma, beta3 = 0, 0, 0
+            if 'beta_2' in isobar_conf:
+                beta2 = isobar_conf['beta_2']['value']
+            if 'gamma' in isobar_conf:
+                gamma = isobar_conf['gamma']['value']
+            if 'beta_3' in isobar_conf:
+                beta3 = isobar_conf['beta_3']['value']
+
 
             # Short-range correlation parameters
-            correlation_volume = 0 # volume of desired correlation \int dr r^2 C(r)
-            correlation_extremum = -1 # minimum (if negative) or maximum (if positive) of desired correlation
+            # correlation_volume = 0 # volume of desired correlation \int dr r^2 C(r)
+            # correlation_extremum = -1 # minimum (if negative) or maximum (if positive) of desired correlation
             if 'correlation_volume' in isobar_conf:
                 correlation_volume = isobar_conf['correlation_volume']['value']
             if 'correlation_extremum' in isobar_conf:
                 correlation_extremum = isobar_conf['correlation_extremum']['value']
-            realistic_correlation = 0
+            # realistic_correlation = 0
             if 'realistic_correlation' in isobar_conf:
                 realistic_correlation = isobar_conf['realistic_correlation']['value']
 #                 print(f'{realistic_correlation=}')
