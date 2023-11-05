@@ -439,7 +439,7 @@ def main():
         # if(not os.path.isdir(out_dir)):
         #     os.mkdir(out_dir)
     except IOError:
-        print(f"Error: Missing key in configuration file: {e}")
+        print(f"Error: Missing key in configuration file.  Check {conffile}")
         sys.exit(1)
     # conf_samples = confs['isobar_samples']
     # n_configs = conf_samples['number_configs']['value']
@@ -482,7 +482,7 @@ def main():
                 R_ws = isobar_conf['WS_radius']['value']
                 a_ws = isobar_conf['WS_diffusiveness']['value']
             except IOError:
-                print(f"Error: Missing WS_radius or WS_diffusiveness in isobar: {e}")
+                print(f"Error: Missing WS_radius or WS_diffusiveness in isobar{n_isobars+1} configuration.  Check {conffile}")
                 sys.exit(1)
             # or step+Gauss function
             R_step = 0
