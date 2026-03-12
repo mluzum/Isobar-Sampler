@@ -79,6 +79,18 @@ def Y_20(costheta,phi):
 def Y_30(costheta,phi):
     return np.sqrt(7./(4.*np.pi))*(5.*costheta**3 -3.*costheta)/2.
 
+def Y_31(costheta,phi):
+    sintheta = np.sqrt(1 - costheta**2)
+    return (-1./8.)*np.sqrt(21./np.pi)*sintheta*(5.*costheta**2 -1)*math.cos(phi)
+
+def Y_32(costheta,phi):
+    sintheta = np.sqrt(1 - costheta**2)
+    return (1./4.)*np.sqrt(105./(2*np.pi))*sintheta**2*costheta*math.cos(2*phi)
+
+def Y_33(costheta,phi):
+    sintheta = np.sqrt(1 - costheta**2)
+    return (-1./8.)*np.sqrt(35./np.pi)*sintheta**3*math.cos(3*phi)
+
 # @jit(nopython=True)
 # Derivative with respect to theta, phi
 def dY20_dtheta(costheta,sintheta,phi):
@@ -449,6 +461,12 @@ def main():
     njobs = 1  # default to serial calculation
     if 'number_of_parallel_processes' in conf_samples:
         njobs = conf_samples['number_of_parallel_processes']['value']
+    start_configuration = 0
+    if 'start_configuration' in conf_samples:
+        start_configuration = conf_samples['start_configuration']['value']
+        if start_configuration < 0 or start_configuration >= n_configs:
+            print(f"Error: start_configuration {start_configuration} out of range [0, {n_configs})")
+            sys.exit(1)
     if(not os.path.isdir(out_dir)):
         os.mkdir(out_dir)
     
@@ -459,8 +477,15 @@ def main():
         print(f"Error: Could not read file {seeds_file}")
         sys.exit(1)
 
+    # Set starting configuration
+    seeds = np.array(seeds[start_configuration:,:,:])
+
     if seeds.shape[0] < n_configs:
         n_configs = seeds.shape[0]
+    if seeds.shape[1] < number_nucleons:
+        print("Error: Requested number of nucleons per nucleus, A, larger than provided seeds")
+        number_nucleons = seeds.shape[1]
+        sys.exit(1)
 
     n_isobars = 0
     isobars = []
