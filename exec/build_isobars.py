@@ -426,7 +426,10 @@ def build_nucleus(seeds_nucleus, n_nucleons, R_ws, a_ws, R_step, w_gauss, beta2,
 
 #%%
 def main():
-    
+    if len(sys.argv) != 2:
+        print("Usage: ./build_isobars.py conf.yaml")
+        sys.exit(1)
+
     # Read parameter file containing settings and all isobar configurations
     conffile = sys.argv[1]
     try:
@@ -450,7 +453,7 @@ def main():
         #     njobs = conf_samples['number_of_parallel_processes']['value']
         # if(not os.path.isdir(out_dir)):
         #     os.mkdir(out_dir)
-    except IOError:
+    except KeyError:
         print(f"Error: Missing key in configuration file.  Check {conffile}")
         sys.exit(1)
     # conf_samples = confs['isobar_samples']
@@ -482,9 +485,9 @@ def main():
 
     if seeds.shape[0] < n_configs:
         n_configs = seeds.shape[0]
-    if seeds.shape[1] < number_nucleons:
+    if seeds.shape[1] < n_nucleons:
         print("Error: Requested number of nucleons per nucleus, A, larger than provided seeds")
-        number_nucleons = seeds.shape[1]
+        n_nucleons = seeds.shape[1]
         sys.exit(1)
 
     n_isobars = 0
@@ -506,7 +509,7 @@ def main():
             try:
                 R_ws = isobar_conf['WS_radius']['value']
                 a_ws = isobar_conf['WS_diffusiveness']['value']
-            except IOError:
+            except KeyError:
                 print(f"Error: Missing WS_radius or WS_diffusiveness in isobar{n_isobars+1} configuration.  Check {conffile}")
                 sys.exit(1)
             # or step+Gauss function
