@@ -89,6 +89,9 @@ def Y_33(costheta,phi):
     sintheta = np.sqrt(1 - costheta**2)
     return (-1./8.)*np.sqrt(35./np.pi)*sintheta**3*math.cos(3*phi)
 
+def Y_40(costheta,phi):
+    return (3./16.)*(1./(math.sqrt(np.pi)))*(35.*costheta**4 - 30.*costheta**2 + 3)
+
 # @jit(nopython=True)
 # Derivative with respect to theta, phi
 def dY20_dtheta(costheta,sintheta,phi):
@@ -101,6 +104,10 @@ def dY22_dtheta(costheta,sintheta,phi):
 # @jit(nopython=True)
 def dY30_dtheta(costheta,sintheta,phi):
     return 1./4.*math.sqrt(7./np.pi)*(3*sintheta-15*sintheta*costheta**2)
+
+# @jit(nopython=True)
+def dY40_dtheta(costheta,sintheta,phi):
+    return (15./4.)*(1./(math.sqrt(np.pi)))*costheta*(3 - 7.*costheta**2)*sintheta
 
 # @jit(nopython=True)
 def dY22_dphi(costheta,sintheta,phi):
@@ -299,7 +306,7 @@ def add_correlations_step(nucleus, c_length, c_strength, avgprob):
 # Modifies coordinates of a nucleon according to angular deformation parameterized by coefficients beta_{l,m}
 # def deform(r,costheta,phi,Rws,Rstep, w,b20,b22,b3,db20,db22,db3):
 # def deform(r,costheta,phi,Rws,Rstep, w,beta20,beta22,beta3, f2, fp2,f3,fp3):
-def deform_nucleon(r,costheta,phi,R,beta20,beta22,beta3, f2, fp2,f3,fp3):
+def deform_nucleon(r,costheta,phi,R,beta20,beta22,beta3,beta4,f2,fp2,f3,fp3, f4, fp4):
 #     beta20 = b2*math.cos(gamma)
 #     beta22 = b2*math.sin(gamma)/np.sqrt(2)
     costheta = float(np.clip(costheta, -1.0, 1.0))
@@ -314,16 +321,23 @@ def deform_nucleon(r,costheta,phi,R,beta20,beta22,beta3, f2, fp2,f3,fp3):
     fp2r = fp2(r)
     f3r = f3(r)
     fp3r = fp3(r)
+    f4r = f4(r)
+    fp4r = fp4(r)
+
+    # Angular shifts
     dtheta += R/r/r*beta20*f2r*dY20_dtheta(costheta,sintheta,phi)
     dtheta += R/r/r*beta22*f2r*dY22_dtheta(costheta,sintheta,phi)
     dtheta += R/r/r*beta3*f3r*dY30_dtheta(costheta,sintheta,phi)
+    dtheta += R/r/r*beta4*f4r*dY40_dtheta(costheta,sintheta,phi)
 
     sintheta2 = max(sintheta**2, EPS)
     dphi += R/r**2/sintheta2*beta22*f2r*dY22_dphi(costheta,sintheta,phi)
 
+    # Radial shifts
     dr += R*beta20*fp2r*Y_20(costheta,phi)
     dr += R*beta22*fp2r*Y_22(costheta,phi)
     dr += R*beta3*fp3r*Y_30(costheta,phi)
+    dr += R*beta4*fp4r*Y_40(costheta,phi)
     
     
 #     if np.abs(dr) >= np.abs(r):
@@ -344,7 +358,8 @@ def deform_nucleon(r,costheta,phi,R,beta20,beta22,beta3, f2, fp2,f3,fp3):
 
 # Take configuration of a nucleus and deform it by shifting each nucleon with deform() function
 # Uncorrelated nucleons will still be uncorrelated after deformation.
-def deform_nucleus(nucleus, R, beta2, gamma, beta3, f2, fp2,f3,fp3):
+# Updated to include beta4 (hexadecapole deformation)
+def deform_nucleus(nucleus, R, beta2, gamma, beta3, beta4, f2, fp2, f3, fp3, f4, fp4):
 #     rmin = 1.0e-1
     rmin = R/10
     for nucleon, position in enumerate(nucleus):
@@ -359,7 +374,7 @@ def deform_nucleus(nucleus, R, beta2, gamma, beta3, f2, fp2,f3,fp3):
 
             nsteps = 10
             for step in range(nsteps):
-                r,costheta,phi = deform_nucleon(r,costheta,phi,R,beta20/nsteps,beta22/nsteps,beta3/nsteps, f2, fp2,f3,fp3)
+                r,costheta,phi = deform_nucleon(r,costheta,phi,R,beta20/nsteps,beta22/nsteps,beta3/nsteps,beta4/nsteps,f2,fp2,f3,fp3,f4,fp4)
 
             x, y, z = cartesian(r,costheta,phi)
             nucleus[nucleon] = np.array([x,y,z])
@@ -404,7 +419,8 @@ def place_nucleon(R_step, w_gauss, seed):
 # Build nucleus by randomly placing nucleons independently according to a 
 # spherically-symmetric distribution, then adding angular deformation,
 # then adding short-range pair correlation.  Result is list of positions in cartesian coordinates.
-def build_nucleus(seeds_nucleus, n_nucleons, R_ws, a_ws, R_step, w_gauss, beta2, gamma, beta3, c_volume, c_extremum, realistic_correlation, avgprob, f2, fp2, f3, fp3, corr_shift_interp):
+# Updated to include beta4 (hexadecapole deformation) 
+def build_nucleus(seeds_nucleus, n_nucleons, R_ws, a_ws, R_step, w_gauss, beta2, gamma, beta3, beta4, c_volume, c_extremum, realistic_correlation, avgprob, f2, fp2, f3, fp3, f4, fp4, corr_shift_interp):
 
     # Place nucleons via 3D step + Gaussian
     nucleus = np.empty((n_nucleons,3))
@@ -413,8 +429,8 @@ def build_nucleus(seeds_nucleus, n_nucleons, R_ws, a_ws, R_step, w_gauss, beta2,
         nucleus[n,:] = place_nucleon(R_step, w_gauss, seeds_nucleus[n])
         
     # Perform angular deformation by shifting nucleon positions
-    if (beta2 != 0 or beta3 != 0):
-        nucleus = deform_nucleus(nucleus, R_ws, beta2, gamma, beta3, f2, fp2,f3,fp3)
+    if (beta2 != 0 or beta3 != 0 or beta4 != 0):
+        nucleus = deform_nucleus(nucleus, R_ws, beta2, gamma, beta3, beta4, f2, fp2,f3,fp3, f4, fp4)
         
 
     # Add short-range correlations by shifting nucleon positions
@@ -508,7 +524,7 @@ def main():
             isobar_conf = confs['isobar_properties']['isobar'+str(n_isobars+1)]
 
             # Default values for all parameters, if they don't appear in the input file
-            beta2, gamma, beta3 = 0, 0, 0 # angular deformation parameters
+            beta2, gamma, beta3, beta4 = 0, 0, 0, 0 # angular deformation parameters (added beta4)
             realistic_correlation = 0 # 1 if using realistic correlation, 0 if using step function
             correlation_volume = 0 # volume of desired correlation \int dr r^2 C(r)
             correlation_extremum = -1 # minimum (if negative) or maximum (if positive) of desired correlation
@@ -530,13 +546,15 @@ def main():
                 diffusiveness = isobar_conf['step_diffusiveness']['value']
             
             # Angular deformation parameters
-            # beta2, gamma, beta3 = 0, 0, 0
+            # beta2, gamma, beta3, beta4 = 0, 0, 0, 0
             if 'beta_2' in isobar_conf:
                 beta2 = isobar_conf['beta_2']['value']
             if 'gamma' in isobar_conf:
                 gamma = isobar_conf['gamma']['value']
             if 'beta_3' in isobar_conf:
                 beta3 = isobar_conf['beta_3']['value']
+            if 'beta_4' in isobar_conf:
+                beta4 = isobar_conf['beta_4']['value']    
 
 
             # Short-range correlation parameters
@@ -616,6 +634,7 @@ def main():
         beta2 = isobars[isobar,4]
         gamma = isobars[isobar,5]
         beta3 = isobars[isobar,6]
+        beta4 = isobars[isobar,10]
         realistic_correlation = isobars[isobar,9]
 #         print(f'{realistic_correlation=}')
         
@@ -628,8 +647,8 @@ def main():
 
         # Prepare angular deformation.  Solve differential equation once and 
         # pass interpolation functions via arguments for evaluation in deform_*()
-        if (beta2 != 0 or beta3 != 0):
-            print(f'Solving differential equation for angular deformation.  {beta2=}, {gamma=}, {beta3=}')
+        if (beta2 != 0 or beta3 != 0 or beta4 != 0):
+            print(f'Solving differential equation for angular deformation.  {beta2=}, {gamma=}, {beta3=}, {beta4=}')
             rmin = R_ws/10
             rmax = 3*R_ws
             
@@ -649,12 +668,20 @@ def main():
 
             f3 = interp1d(res3.t, res3.y[0] - res3.y[1,-1]/res3.y[3,-1]*res3.y[2])
             fp3 = interp1d(res3.t, res3.y[1] - res3.y[1,-1]/res3.y[3,-1]*res3.y[3])
+
+            # multipole l = 4 (hexadecapole)
+            args=(R_ws,a_ws,4) # l = 4 
+            res4 = solve_ivp(fun=lambda t,y: diff_eq(t,y,*args), y0=z_init,t_span=[rmax, rmin],rtol=1e-10,atol=1e-10)
+
+            f4 = interp1d(res4.t, res4.y[0] - res4.y[1,-1]/res4.y[3,-1]*res4.y[2])
+            fp4 = interp1d(res4.t, res4.y[1] - res4.y[1,-1]/res4.y[3,-1]*res4.y[3])
         else:
             f2 = 0
             fp2 = 0
             f3 = 0
             fp3 = 0
-
+            f4 = 0
+            fp4 = 0
 
 #         Prepare correlation
         correlation_volume = isobars[isobar,7]
@@ -704,7 +731,7 @@ def main():
 #         njobs = 60
 #         njobs = -1
 #         print('building nuclei')
-        data = Parallel(n_jobs=njobs)(delayed(build_nucleus)(seeds[s],n_nucleons,*isobars[isobar],avgprob,f2,fp2,f3,fp3, corr_shift_interp) for s in range(n_configs))
+        data = Parallel(n_jobs=njobs)(delayed(build_nucleus)(seeds[s],n_nucleons,*isobars[isobar],avgprob,f2,fp2,f3,fp3,f4,fp4,corr_shift_interp) for s in range(n_configs))
 #         for s in range(n_configs):
 #             data[s,:,:] = build_nucleus(seeds[s],n_nucleons,*isobars[isobar],f2,fp2,f3,fp3)
     
