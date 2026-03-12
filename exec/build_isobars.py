@@ -22,9 +22,6 @@ import os
 import yaml
 import math
 
-import warnings
-warnings.filterwarnings('ignore', category=RuntimeWarning)
-
 
 # import pickle
 from scipy.optimize import fsolve
@@ -56,6 +53,7 @@ from mpmath import polylog
 
 # N_SEEDS = 3 + 3 # 3 for r, theta, phi + 3 for delta_{x,y,z} Gaussian
 POS_SEEDS = {'radius':0,'costheta':1,'phi':2,'gauss_x':3,'gauss_y':4,'gauss_z':5 }
+EPS = 1.0e-12
 # GAUSS_SEEDS = ['gauss_x','gauss_y','gauss_z'] # Gaussian seeds
 # UNIFORM_SEEDS = ['radius','costheta','phi']
 #%%
@@ -266,6 +264,8 @@ def add_correlations_realistic(nucleus, c_volume, c_extremum, corr_shift_interp)
             # r = np.linalg.norm(r_vec)
 #             shift_magnitude = corr_shift_realistic(r, integrated_correlation, strength_scale, length_scale, avgprob)
             shift_magnitude = corr_shift_interp(r)
+            if r <= EPS:
+                continue
             shift = shift_magnitude*r_vec/r
             cumulative_shift[nucleonA] -= shift/2
             cumulative_shift[nucleonB] += shift/2
@@ -286,6 +286,8 @@ def add_correlations_step(nucleus, c_length, c_strength, avgprob):
             # r = np.linalg.norm(r_vec)
 
             shift_magnitude = corr_shift_step(r, c_length, c_strength, avgprob)
+            if r <= EPS:
+                continue
             shift = shift_magnitude*r_vec/r
             cumulative_shift[nucleonA] -= shift/2
             cumulative_shift[nucleonB] += shift/2
@@ -300,11 +302,14 @@ def add_correlations_step(nucleus, c_length, c_strength, avgprob):
 def deform_nucleon(r,costheta,phi,R,beta20,beta22,beta3, f2, fp2,f3,fp3):
 #     beta20 = b2*math.cos(gamma)
 #     beta22 = b2*math.sin(gamma)/np.sqrt(2)
+    costheta = float(np.clip(costheta, -1.0, 1.0))
     theta = np.arccos(costheta)
     dtheta=0
     dphi = 0
     dr = 0
-    sintheta = math.sqrt(1-costheta**2)
+    sintheta = math.sqrt(max(0.0, 1-costheta**2))
+    if r <= EPS:
+        return r, costheta, phi
     f2r = f2(r)
     fp2r = fp2(r)
     f3r = f3(r)
@@ -313,7 +318,8 @@ def deform_nucleon(r,costheta,phi,R,beta20,beta22,beta3, f2, fp2,f3,fp3):
     dtheta += R/r/r*beta22*f2r*dY22_dtheta(costheta,sintheta,phi)
     dtheta += R/r/r*beta3*f3r*dY30_dtheta(costheta,sintheta,phi)
 
-    dphi += R/r**2/sintheta**2*beta22*f2r*dY22_dphi(costheta,sintheta,phi)
+    sintheta2 = max(sintheta**2, EPS)
+    dphi += R/r**2/sintheta2*beta22*f2r*dY22_dphi(costheta,sintheta,phi)
 
     dr += R*beta20*fp2r*Y_20(costheta,phi)
     dr += R*beta22*fp2r*Y_22(costheta,phi)
@@ -470,8 +476,11 @@ def main():
         if start_configuration < 0 or start_configuration >= n_configs:
             print(f"Error: start_configuration {start_configuration} out of range [0, {n_configs})")
             sys.exit(1)
-    if(not os.path.isdir(out_dir)):
-        os.mkdir(out_dir)
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+    except OSError as exc:
+        print(f"Error: Could not create output directory {out_dir}: {exc}")
+        sys.exit(1)
     
     try:
         with h5py.File(seeds_file, 'r') as f:
