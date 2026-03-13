@@ -416,11 +416,20 @@ def place_nucleon(R_step, w_gauss, seed):
 
 
 
-# Build nucleus by randomly placing nucleons independently according to a 
+# Build nucleus by randomly placing nucleons independently according to a
 # spherically-symmetric distribution, then adding angular deformation,
 # then adding short-range pair correlation.  Result is list of positions in cartesian coordinates.
-# Updated to include beta4 (hexadecapole deformation) 
-def build_nucleus(seeds_nucleus, n_nucleons, R_ws, a_ws, R_step, w_gauss, beta2, gamma, beta3, beta4, c_volume, c_extremum, realistic_correlation, avgprob, f2, fp2, f3, fp3, f4, fp4, corr_shift_interp):
+def build_nucleus(seeds_nucleus, n_nucleons, isobar_config, avgprob, f2, fp2, f3, fp3, f4, fp4, corr_shift_interp):
+    R_ws = isobar_config['R_ws']
+    R_step = isobar_config['R_step']
+    w_gauss = isobar_config['w_gauss']
+    beta2 = isobar_config['beta2']
+    gamma = isobar_config['gamma']
+    beta3 = isobar_config['beta3']
+    beta4 = isobar_config['beta4']
+    c_volume = isobar_config['correlation_volume']
+    c_extremum = isobar_config['correlation_extremum']
+    realistic_correlation = isobar_config['realistic_correlation']
 
     # Place nucleons via 3D step + Gaussian
     nucleus = np.empty((n_nucleons,3))
@@ -446,6 +455,128 @@ def build_nucleus(seeds_nucleus, n_nucleons, R_ws, a_ws, R_step, w_gauss, beta2,
 
     
 
+def _nested_key_exists(mapping, keys):
+    current = mapping
+    for key in keys:
+        if not isinstance(current, dict) or key not in current:
+            return False
+        current = current[key]
+    return True
+
+
+def _nested_value(mapping, keys, default=None):
+    current = mapping
+    for key in keys:
+        if not isinstance(current, dict) or key not in current:
+            return default
+        current = current[key]
+    return current
+
+
+def validate_configuration(confs):
+    errors = []
+
+    if not isinstance(confs, dict):
+        return ["Top-level YAML document must be a mapping."]
+
+    required_top_level = [
+        ('isobar_samples',),
+        ('isobar_properties',),
+        ('isobar_samples', 'number_configs', 'value'),
+        ('isobar_samples', 'number_nucleons', 'value'),
+        ('isobar_samples', 'seeds_file', 'filename'),
+        ('isobar_samples', 'output_path', 'dirname'),
+    ]
+    for path in required_top_level:
+        if not _nested_key_exists(confs, path):
+            errors.append(f"Missing required configuration key: {'.'.join(path)}")
+
+    if errors:
+        return errors
+
+    n_configs = _nested_value(confs, ('isobar_samples', 'number_configs', 'value'))
+    if not isinstance(n_configs, int) or n_configs <= 0:
+        errors.append("isobar_samples.number_configs.value must be a positive integer")
+
+    n_nucleons = _nested_value(confs, ('isobar_samples', 'number_nucleons', 'value'))
+    if not isinstance(n_nucleons, int) or n_nucleons <= 0:
+        errors.append("isobar_samples.number_nucleons.value must be a positive integer")
+
+    njobs = _nested_value(confs, ('isobar_samples', 'number_of_parallel_processes', 'value'))
+    if njobs is not None and (not isinstance(njobs, int) or njobs == 0):
+        errors.append("isobar_samples.number_of_parallel_processes.value must be a non-zero integer")
+
+    start_configuration = _nested_value(confs, ('isobar_samples', 'start_configuration', 'value'))
+    if start_configuration is not None and (not isinstance(start_configuration, int) or start_configuration < 0):
+        errors.append("isobar_samples.start_configuration.value must be a non-negative integer")
+
+    isobar_properties = confs['isobar_properties']
+    if not isinstance(isobar_properties, dict):
+        errors.append("isobar_properties must be a mapping")
+        return errors
+
+    isobar_index = 1
+    found_isobar = False
+    while f'isobar{isobar_index}' in isobar_properties:
+        found_isobar = True
+        isobar_key = f'isobar{isobar_index}'
+        isobar_conf = isobar_properties[isobar_key]
+
+        if not isinstance(isobar_conf, dict):
+            errors.append(f"{isobar_key} must be a mapping")
+            isobar_index += 1
+            continue
+
+        required_isobar_paths = [
+            ('WS_radius', 'value'),
+            ('WS_diffusiveness', 'value'),
+            ('isobar_name',),
+        ]
+        for path in required_isobar_paths:
+            if not _nested_key_exists(isobar_conf, path):
+                errors.append(f"Missing required configuration key: {isobar_key}.{'.'.join(path)}")
+
+        R_ws = _nested_value(isobar_conf, ('WS_radius', 'value'))
+        if R_ws is not None and R_ws <= 0:
+            errors.append(f"{isobar_key}.WS_radius.value must be positive")
+
+        a_ws = _nested_value(isobar_conf, ('WS_diffusiveness', 'value'))
+        if a_ws is not None and a_ws <= 0:
+            errors.append(f"{isobar_key}.WS_diffusiveness.value must be positive")
+
+        step_radius = _nested_value(isobar_conf, ('step_radius', 'value'))
+        if step_radius is not None and step_radius <= 0:
+            errors.append(f"{isobar_key}.step_radius.value must be positive")
+
+        step_diffusiveness = _nested_value(isobar_conf, ('step_diffusiveness', 'value'))
+        if step_diffusiveness is not None and step_diffusiveness <= 0:
+            errors.append(f"{isobar_key}.step_diffusiveness.value must be positive")
+
+        realistic_correlation = _nested_value(isobar_conf, ('realistic_correlation', 'value'), 0)
+        if realistic_correlation not in (0, 1):
+            errors.append(f"{isobar_key}.realistic_correlation.value must be 0 or 1")
+
+        correlation_extremum = _nested_value(isobar_conf, ('correlation_extremum', 'value'))
+        if correlation_extremum is not None and correlation_extremum < -1:
+            errors.append(f"{isobar_key}.correlation_extremum.value cannot be smaller than -1")
+
+        correlation_length = _nested_value(isobar_conf, ('correlation_length', 'value'))
+        if correlation_length is not None and correlation_length <= 0:
+            errors.append(f"{isobar_key}.correlation_length.value must be positive")
+
+        length_scale = _nested_value(isobar_conf, ('length_scale', 'value'))
+        if length_scale is not None and length_scale <= 0:
+            errors.append(f"{isobar_key}.length_scale.value must be positive")
+
+        isobar_index += 1
+
+    if not found_isobar:
+        errors.append("No isobar definitions found under isobar_properties")
+
+    return errors
+
+
+
 #%%
 def main():
     if len(sys.argv) != 2:
@@ -459,6 +590,13 @@ def main():
             confs = yaml.load(stream, Loader=SafeLoader)
     except IOError:
         print(f"Error: Could not read file {conffile}")
+        sys.exit(1)
+
+    validation_errors = validate_configuration(confs)
+    if validation_errors:
+        print("Error: Invalid configuration file:")
+        for error in validation_errors:
+            print(f"  - {error}")
         sys.exit(1)
     # with open(conffile, 'r') as stream:
     #     confs = yaml.load(stream,Loader=SafeLoader)
@@ -486,12 +624,7 @@ def main():
     njobs = 1  # default to serial calculation
     if 'number_of_parallel_processes' in conf_samples:
         njobs = conf_samples['number_of_parallel_processes']['value']
-    start_configuration = 0
-    if 'start_configuration' in conf_samples:
-        start_configuration = conf_samples['start_configuration']['value']
-        if start_configuration < 0 or start_configuration >= n_configs:
-            print(f"Error: start_configuration {start_configuration} out of range [0, {n_configs})")
-            sys.exit(1)
+
     try:
         os.makedirs(out_dir, exist_ok=True)
     except OSError as exc:
@@ -505,6 +638,14 @@ def main():
         print(f"Error: Could not read file {seeds_file}")
         sys.exit(1)
 
+    nseeds = seeds.shape[0]
+    start_configuration = 0
+    if 'start_configuration' in conf_samples:
+        start_configuration = conf_samples['start_configuration']['value']
+        if start_configuration < 0 or start_configuration >= nseeds:
+            print(f"Error: start_configuration {start_configuration} out of range [0, {nseeds})")
+            sys.exit(1)
+
     # Set starting configuration
     seeds = np.array(seeds[start_configuration:,:,:])
 
@@ -517,7 +658,6 @@ def main():
 
     n_isobars = 0
     isobars = []
-    isobar_names = []
 
     # Read and pre-process parameters for each isobar configuration
     while ('isobar'+str(n_isobars+1) in confs['isobar_properties'].keys()):
@@ -617,31 +757,43 @@ def main():
                 raise Exception('correlation_extremum/correlation_strength cannot be smaller than -1')
                     
             # print(f'{correlation_extremum=}, {correlation_volume=}') 
-            isobars += [ [R_ws,a_ws,R_step,diffusiveness,beta2,gamma,beta3, correlation_volume, correlation_extremum, realistic_correlation] ]
-            isobar_names += [ isobar_conf['isobar_name'] ]
+            isobars.append({
+                'name': isobar_conf['isobar_name'],
+                'R_ws': R_ws,
+                'a_ws': a_ws,
+                'R_step': R_step,
+                'w_gauss': diffusiveness,
+                'beta2': beta2,
+                'gamma': gamma,
+                'beta3': beta3,
+                'beta4': beta4,
+                'correlation_volume': correlation_volume,
+                'correlation_extremum': correlation_extremum,
+                'realistic_correlation': realistic_correlation,
+                'correlation_file': correlation_file if realistic_correlation != 0 else None,
+            })
             n_isobars +=1
         
 
     
     # Prepare each isobar configuration
-    isobars = np.array(isobars)
-    for isobar in range(n_isobars):
-        print(f'Building isobar {isobar+1}')
-        R_ws = isobars[isobar,0]
-        a_ws = isobars[isobar,1]
-        R_step = isobars[isobar,2]
-        w = isobars[isobar,3]
-        beta2 = isobars[isobar,4]
-        gamma = isobars[isobar,5]
-        beta3 = isobars[isobar,6]
-        beta4 = isobars[isobar,10]
-        realistic_correlation = isobars[isobar,9]
+    for isobar_index, isobar_config in enumerate(isobars):
+        print(f'Building isobar {isobar_index+1}')
+        R_ws = isobar_config['R_ws']
+        a_ws = isobar_config['a_ws']
+        R_step = isobar_config['R_step']
+        w = isobar_config['w_gauss']
+        beta2 = isobar_config['beta2']
+        gamma = isobar_config['gamma']
+        beta3 = isobar_config['beta3']
+        beta4 = isobar_config['beta4']
+        realistic_correlation = isobar_config['realistic_correlation']
 #         print(f'{realistic_correlation=}')
         
         if R_step == 0 or w == 0:
             (R_step, w_step) = Rst_w_from_WS(R_ws,a_ws)
-            isobars[isobar,2] = R_step
-            isobars[isobar,3] = w_step
+            isobar_config['R_step'] = R_step
+            isobar_config['w_gauss'] = w_step
             print(f'R_step and w not specified.  Determining from Woods-Saxon parameters {R_ws=} fm, {a_ws=} fm --> {R_step=:.3f} fm, {w_step=:.3f} fm')
             
 
@@ -684,8 +836,8 @@ def main():
             fp4 = 0
 
 #         Prepare correlation
-        correlation_volume = isobars[isobar,7]
-        correlation_extremum = isobars[isobar,8]
+        correlation_volume = isobar_config['correlation_volume']
+        correlation_extremum = isobar_config['correlation_extremum']
         # average probability <\rho> = \int d^3r \rho^2, required for calculation of shift due to short-range correlation.
         # For effiency, compute only once and pass the value via arguments
         avgprob = quad(lambda r: r**2*Woods_Saxon(r,R_ws,a_ws)**2, 0,np.inf)[0]*4*np.pi
@@ -694,6 +846,7 @@ def main():
             # Realistic correlation means correlation function that matches 2-body correlation of Alvioli, Strikman, et al
             # Otherwise, a simple step function is used
             if realistic_correlation == 1:
+                correlation_file = isobar_config['correlation_file']
                 correlation_list = np.load(correlation_file)
                 # binning that was used to generate correlation_file
                 nrbins = 125
@@ -731,12 +884,12 @@ def main():
 #         njobs = 60
 #         njobs = -1
 #         print('building nuclei')
-        data = Parallel(n_jobs=njobs)(delayed(build_nucleus)(seeds[s],n_nucleons,*isobars[isobar],avgprob,f2,fp2,f3,fp3,f4,fp4,corr_shift_interp) for s in range(n_configs))
+        data = Parallel(n_jobs=njobs)(delayed(build_nucleus)(seeds[s], n_nucleons, isobar_config, avgprob, f2, fp2, f3, fp3, f4, fp4, corr_shift_interp) for s in range(n_configs))
 #         for s in range(n_configs):
 #             data[s,:,:] = build_nucleus(seeds[s],n_nucleons,*isobars[isobar],f2,fp2,f3,fp3)
     
-        with h5py.File(out_dir+'/'+isobar_names[isobar]+'.hdf', 'w') as f:
-            data_set = f.create_dataset(isobar_names[isobar],(n_configs,n_nucleons,3))
+        with h5py.File(out_dir+'/'+isobar_config['name']+'.hdf', 'w') as f:
+            data_set = f.create_dataset(isobar_config['name'],(n_configs,n_nucleons,3))
             data_set[:] = data 
             
 #%%
