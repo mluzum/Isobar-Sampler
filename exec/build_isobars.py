@@ -647,14 +647,20 @@ def main():
             sys.exit(1)
 
     # Set starting configuration
+    # Keep global-event row selection intact, then use the first A nucleon
+    # entries from each selected row. The seed file may contain more entries
+    # per row than the nucleus requested by the parameter dictionary.
     seeds = np.array(seeds[start_configuration:,:,:])
+    if seeds.shape[1] < n_nucleons:
+        print(
+            "Error: Requested number of nucleons per nucleus, A, is larger "
+            "than the available seeds per row"
+        )
+        sys.exit(1)
+    seeds = seeds[:, :n_nucleons, :]
 
     if seeds.shape[0] < n_configs:
         n_configs = seeds.shape[0]
-    if seeds.shape[1] < n_nucleons:
-        print("Error: Requested number of nucleons per nucleus, A, larger than provided seeds")
-        n_nucleons = seeds.shape[1]
-        sys.exit(1)
 
     n_isobars = 0
     isobars = []
