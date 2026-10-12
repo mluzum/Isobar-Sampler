@@ -187,6 +187,73 @@ def Rst_w_from_WS(R,a):
     return R*res.x
 
 
+# The step+Gaussian parameters are a pure function of (R_ws, a_ws), but the
+# KL-divergence fit that produces them costs ~2.4 s (a BFGS minimise, each step
+# a quad() of polylog). It is recomputed on every invocation otherwise, i.e.
+# twice per event, for a value that is constant for a whole design point.
+#
+# Once computed, they are written back into the run's own configuration file
+# together with the Woods-Saxon parameters they were derived from, so later events
+# in the same event folder reuse them. The signature guards against a stale cache:
+# if R_ws or a_ws differ, the values are recomputed.
+_STEP_CACHE_KEY = '_step_gaussian_cache'
+
+# Memoised deformation ODE solutions, keyed on (R_ws, a_ws). See the call site.
+_DEFORM_SOLVE_CACHE = {}
+
+
+def resolve_step_gaussian(isobar_conf, R_ws, a_ws, conf_file, isobar_key):
+    """Return (R_step, w_gauss), reusing the config cache when it is still valid.
+
+    Uses explicit step_radius/step_diffusiveness when the configuration supplies
+    them (unchanged upstream behaviour). Otherwise computes the KL fit once and
+    persists it, so that subsequent invocations against the same configuration
+    file -- i.e. the remaining events of this job -- skip the fit entirely.
+    """
+    R_step = _nested_value(isobar_conf, ('step_radius', 'value'), 0)
+    w = _nested_value(isobar_conf, ('step_diffusiveness', 'value'), 0)
+    if R_step and w:
+        return R_step, w
+
+    cache = isobar_conf.get(_STEP_CACHE_KEY)
+    signature = {'R_ws': float(R_ws), 'a_ws': float(a_ws)}
+    if (isinstance(cache, dict)
+            and cache.get('signature') == signature
+            and cache.get('R_step')
+            and cache.get('w_gauss')):
+        return float(cache['R_step']), float(cache['w_gauss'])
+
+    R_step, w_gauss = Rst_w_from_WS(R_ws, a_ws)
+    print(f'R_step and w not specified.  Determining from Woods-Saxon parameters '
+          f'{R_ws=} fm, {a_ws=} fm --> {R_step=:.3f} fm, {w_gauss=:.3f} fm')
+
+    # Persist so the remaining events in this event folder do not repeat the fit.
+    # Best-effort: a read-only config directory must not fail the run.
+    try:
+        with open(conf_file, 'r') as stream:
+            on_disk = yaml.load(stream, Loader=SafeLoader)
+        node = on_disk['isobar_properties'][isobar_key]
+        node['step_radius'] = {
+            "description": "Step radius (cached fit result)",
+            "value": float(R_step),
+        }
+        node['step_diffusiveness'] = {
+            "description": "Step Gaussian width (cached fit result)",
+            "value": float(w_gauss),
+        }
+        node[_STEP_CACHE_KEY] = {"signature": signature,
+                                 "R_step": float(R_step),
+                                 "w_gauss": float(w_gauss)}
+        with open(conf_file, 'w') as stream:
+            yaml.safe_dump(on_disk, stream, sort_keys=False)
+        print(f'Cached step+Gaussian fit for {R_ws=} {a_ws=} in {conf_file}')
+    except Exception as exc:
+        print(f'Note: could not cache step+Gaussian fit ({exc}); '
+              f'this run recomputes it.')
+
+    return R_step, w_gauss
+
+
 
 # @jit(nopython=True)
 # Spherical to cartesian coordinates
@@ -631,33 +698,34 @@ def main():
         print(f"Error: Could not create output directory {out_dir}: {exc}")
         sys.exit(1)
     
+    # Read only the rows this invocation needs. The previous form read the whole
+    # dataset (f['isobar_seeds'][:,:,:]) and sliced afterwards, which for the
+    # canonical 10000x300x6 pool costs ~430 ms of I/O per invocation -- paid
+    # twice per event -- to use a single row. The bounds checks and the
+    # "first A nucleons per row" semantics are unchanged.
     try:
         with h5py.File(seeds_file, 'r') as f:
-            seeds = f['isobar_seeds'][:,:,:]
+            dset = f['isobar_seeds']
+            nseeds = dset.shape[0]
+            start_configuration = 0
+            if 'start_configuration' in conf_samples:
+                start_configuration = conf_samples['start_configuration']['value']
+                if start_configuration < 0 or start_configuration >= nseeds:
+                    print(f"Error: start_configuration {start_configuration} out of range [0, {nseeds})")
+                    sys.exit(1)
+
+            if dset.shape[1] < n_nucleons:
+                print(
+                    "Error: Requested number of nucleons per nucleus, A, is larger "
+                    "than the available seeds per row"
+                )
+                sys.exit(1)
+
+            seeds = np.array(
+                dset[start_configuration:start_configuration + n_configs, :n_nucleons, :])
     except IOError:
         print(f"Error: Could not read file {seeds_file}")
         sys.exit(1)
-
-    nseeds = seeds.shape[0]
-    start_configuration = 0
-    if 'start_configuration' in conf_samples:
-        start_configuration = conf_samples['start_configuration']['value']
-        if start_configuration < 0 or start_configuration >= nseeds:
-            print(f"Error: start_configuration {start_configuration} out of range [0, {nseeds})")
-            sys.exit(1)
-
-    # Set starting configuration
-    # Keep global-event row selection intact, then use the first A nucleon
-    # entries from each selected row. The seed file may contain more entries
-    # per row than the nucleus requested by the parameter dictionary.
-    seeds = np.array(seeds[start_configuration:,:,:])
-    if seeds.shape[1] < n_nucleons:
-        print(
-            "Error: Requested number of nucleons per nucleus, A, is larger "
-            "than the available seeds per row"
-        )
-        sys.exit(1)
-    seeds = seeds[:, :n_nucleons, :]
 
     if seeds.shape[0] < n_configs:
         n_configs = seeds.shape[0]
@@ -797,42 +865,57 @@ def main():
 #         print(f'{realistic_correlation=}')
         
         if R_step == 0 or w == 0:
-            (R_step, w_step) = Rst_w_from_WS(R_ws,a_ws)
+            (R_step, w_step) = resolve_step_gaussian(
+                isobar_config, R_ws, a_ws, conffile,
+                f'isobar{isobar_index + 1}')
             isobar_config['R_step'] = R_step
             isobar_config['w_gauss'] = w_step
-            print(f'R_step and w not specified.  Determining from Woods-Saxon parameters {R_ws=} fm, {a_ws=} fm --> {R_step=:.3f} fm, {w_step=:.3f} fm')
             
 
-        # Prepare angular deformation.  Solve differential equation once and 
+        # Prepare angular deformation.  Solve differential equation once and
         # pass interpolation functions via arguments for evaluation in deform_*()
+        #
+        # The solves depend only on (R_ws, a_ws, l) -- never on the betas and
+        # never on the individual configuration -- so they are memoised. With a
+        # single isobar per invocation this is a no-op, but it makes a second
+        # isobar sharing the shape parameters free, and it is what will keep the
+        # per-event deformation draws of a later phase affordable.
         if (beta2 != 0 or beta3 != 0 or beta4 != 0):
-            print(f'Solving differential equation for angular deformation.  {beta2=}, {gamma=}, {beta3=}, {beta4=}')
-            rmin = R_ws/10
-            rmax = 3*R_ws
-            
-            # boundary conditions (at r=rmax) for f, f', f_homo, f'_homo
-            z_init = [rmax,1,1,0]
-            
-            # multipole l = 2
-            args=(R_ws,a_ws,2) # l = 2
-            res2 = solve_ivp(fun=lambda t,y: diff_eq(t,y,*args), y0=z_init,t_span=[rmax, rmin],rtol=1e-10,atol=1e-10)
+            cached = _DEFORM_SOLVE_CACHE.get((R_ws, a_ws))
+            if cached is None:
+                print(f'Solving differential equation for angular deformation.  {R_ws=} {a_ws=}')
+                rmin = R_ws/10
+                rmax = 3*R_ws
 
-            f2 = interp1d(res2.t, res2.y[0] - res2.y[1,-1]/res2.y[3,-1]*res2.y[2])
-            fp2 = interp1d(res2.t, res2.y[1] - res2.y[1,-1]/res2.y[3,-1]*res2.y[3])
-            
-            # multipole l = 3
-            args=(R_ws,a_ws,3) # l = 3
-            res3 = solve_ivp(fun=lambda t,y: diff_eq(t,y,*args), y0=z_init,t_span=[rmax, rmin],rtol=1e-10,atol=1e-10)
+                # boundary conditions (at r=rmax) for f, f', f_homo, f'_homo
+                z_init = [rmax,1,1,0]
 
-            f3 = interp1d(res3.t, res3.y[0] - res3.y[1,-1]/res3.y[3,-1]*res3.y[2])
-            fp3 = interp1d(res3.t, res3.y[1] - res3.y[1,-1]/res3.y[3,-1]*res3.y[3])
+                # multipole l = 2
+                args=(R_ws,a_ws,2) # l = 2
+                res2 = solve_ivp(fun=lambda t,y: diff_eq(t,y,*args), y0=z_init,t_span=[rmax, rmin],rtol=1e-10,atol=1e-10)
 
-            # multipole l = 4 (hexadecapole)
-            args=(R_ws,a_ws,4) # l = 4 
-            res4 = solve_ivp(fun=lambda t,y: diff_eq(t,y,*args), y0=z_init,t_span=[rmax, rmin],rtol=1e-10,atol=1e-10)
+                f2 = interp1d(res2.t, res2.y[0] - res2.y[1,-1]/res2.y[3,-1]*res2.y[2])
+                fp2 = interp1d(res2.t, res2.y[1] - res2.y[1,-1]/res2.y[3,-1]*res2.y[3])
 
-            f4 = interp1d(res4.t, res4.y[0] - res4.y[1,-1]/res4.y[3,-1]*res4.y[2])
-            fp4 = interp1d(res4.t, res4.y[1] - res4.y[1,-1]/res4.y[3,-1]*res4.y[3])
+                # multipole l = 3
+                args=(R_ws,a_ws,3) # l = 3
+                res3 = solve_ivp(fun=lambda t,y: diff_eq(t,y,*args), y0=z_init,t_span=[rmax, rmin],rtol=1e-10,atol=1e-10)
+
+                f3 = interp1d(res3.t, res3.y[0] - res3.y[1,-1]/res3.y[3,-1]*res3.y[2])
+                fp3 = interp1d(res3.t, res3.y[1] - res3.y[1,-1]/res3.y[3,-1]*res3.y[3])
+
+                # multipole l = 4 (hexadecapole)
+                args=(R_ws,a_ws,4) # l = 4
+                res4 = solve_ivp(fun=lambda t,y: diff_eq(t,y,*args), y0=z_init,t_span=[rmax, rmin],rtol=1e-10,atol=1e-10)
+
+                f4 = interp1d(res4.t, res4.y[0] - res4.y[1,-1]/res4.y[3,-1]*res4.y[2])
+                fp4 = interp1d(res4.t, res4.y[1] - res4.y[1,-1]/res4.y[3,-1]*res4.y[3])
+                cached = (f2, fp2, f3, fp3, f4, fp4)
+                _DEFORM_SOLVE_CACHE[(R_ws, a_ws)] = cached
+            else:
+                print(f'Reusing deformation solution for {R_ws=} {a_ws=}')
+            f2, fp2, f3, fp3, f4, fp4 = cached
+            print(f'Applying deformation.  {beta2=}, {gamma=}, {beta3=}, {beta4=}')
         else:
             f2 = 0
             fp2 = 0
@@ -890,7 +973,19 @@ def main():
 #         njobs = 60
 #         njobs = -1
 #         print('building nuclei')
-        data = Parallel(n_jobs=njobs)(delayed(build_nucleus)(seeds[s], n_nucleons, isobar_config, avgprob, f2, fp2, f3, fp3, f4, fp4, corr_shift_interp) for s in range(n_configs))
+        # Build the nuclei. The TRENTo chain always requests a single
+        # configuration (the driver sets number_configs=1 per event), so the
+        # Parallel dispatch below was pure overhead -- ~135 ms of pool setup and
+        # pickling of the interp1d objects per invocation. Call directly in that
+        # case and keep joblib only when there is real work to parallelise.
+        build_args = (n_nucleons, isobar_config, avgprob, f2, fp2, f3, fp3,
+                      f4, fp4, corr_shift_interp)
+        if n_configs == 1:
+            data = np.array([build_nucleus(seeds[0], *build_args)])
+        else:
+            data = Parallel(n_jobs=njobs)(
+                delayed(build_nucleus)(seeds[s], *build_args)
+                for s in range(n_configs))
 #         for s in range(n_configs):
 #             data[s,:,:] = build_nucleus(seeds[s],n_nucleons,*isobars[isobar],f2,fp2,f3,fp3)
     
