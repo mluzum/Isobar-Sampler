@@ -54,8 +54,48 @@ from mpmath import polylog
 # N_SEEDS = 3 + 3 # 3 for r, theta, phi + 3 for delta_{x,y,z} Gaussian
 POS_SEEDS = {'radius':0,'costheta':1,'phi':2,'gauss_x':3,'gauss_y':4,'gauss_z':5 }
 EPS = 1.0e-12
-# GAUSS_SEEDS = ['gauss_x','gauss_y','gauss_z'] # Gaussian seeds
-# UNIFORM_SEEDS = ['radius','costheta','phi']
+
+# -- Seed sources -----------------------------------------------------------
+# 'file'   : read rows from the shipped HDF5 pool (legacy path, kept working).
+# 'philox' : generate rows deterministically from (master_seed, pool address).
+SEED_SOURCE_FILE = 'file'
+SEED_SOURCE_PHILOX = 'philox'
+
+# Counter stride reserved per pool address. Philox produces four uint64 per
+# counter value, and one row of 300 nucleons x 6 columns consumes about 225 of
+# them, so this leaves several orders of magnitude of headroom before two
+# addresses could begin to overlap.
+PHILOX_COUNTER_STRIDE = 1 << 24
+# The upper half of a stride is reserved for draws other than nucleon
+# positions (deformation parameters use purpose 1), keeping the two
+# independent without any extra bookkeeping.
+PHILOX_PURPOSE_STRIDE = PHILOX_COUNTER_STRIDE // 2
+
+
+def generate_seed_rows(master_seed, addresses, n_nucleons, purpose=0):
+    """Generate nucleon seed rows for the given pool addresses.
+
+    Philox is a counter-based generator, so a row is a pure function of
+    (master_seed, address, purpose). It does not depend on call order, on how
+    many rows were drawn earlier, or on anything else in the run. That is the
+    property the synchronised design depends on: every design point must see
+    the *same* nuclei for the same event, so the draw may never depend on any
+    nuclear parameter.
+
+    Column layout matches the shipped pool exactly -- 0-2 uniform in [0,1) for
+    radius, cos(theta) and phi; 3-5 standard normal for the Gaussian folding --
+    so the resulting nuclei are drawn from the same distribution as before.
+    """
+    addresses = np.asarray(list(addresses), dtype=np.uint64)
+    rows = np.empty((addresses.size, n_nucleons, 6), dtype=np.float32)
+    for i, address in enumerate(addresses):
+        counter = (np.uint64(address) * np.uint64(PHILOX_COUNTER_STRIDE) +
+                   np.uint64(purpose) * np.uint64(PHILOX_PURPOSE_STRIDE))
+        gen = np.random.Generator(np.random.Philox(key=master_seed,
+                                                    counter=counter))
+        rows[i, :, :3] = gen.random((n_nucleons, 3))
+        rows[i, :, 3:] = gen.standard_normal((n_nucleons, 3))
+    return rows
 #%%
 
 
@@ -546,17 +586,37 @@ def validate_configuration(confs):
     if not isinstance(confs, dict):
         return ["Top-level YAML document must be a mapping."]
 
+    # seeds_file is only required when the pool is actually read from disk; the
+    # default 'philox' source generates rows from (master_seed, address) and
+    # has no file at all.
+    seed_source = str(_nested_value(confs, ('isobar_samples', 'seed_source', 'value'),
+                                    SEED_SOURCE_FILE)).strip().lower()
     required_top_level = [
         ('isobar_samples',),
         ('isobar_properties',),
         ('isobar_samples', 'number_configs', 'value'),
         ('isobar_samples', 'number_nucleons', 'value'),
-        ('isobar_samples', 'seeds_file', 'filename'),
         ('isobar_samples', 'output_path', 'dirname'),
     ]
+    if seed_source != SEED_SOURCE_FILE:
+        required_top_level.append(('isobar_samples', 'seed_source', 'value'))
+    else:
+        required_top_level.append(('isobar_samples', 'seeds_file', 'filename'))
     for path in required_top_level:
         if not _nested_key_exists(confs, path):
             errors.append(f"Missing required configuration key: {'.'.join(path)}")
+
+    if seed_source not in (SEED_SOURCE_FILE, SEED_SOURCE_PHILOX):
+        errors.append(
+            f"isobar_samples.seed_source.value must be "
+            f"{SEED_SOURCE_FILE!r} or {SEED_SOURCE_PHILOX!r}, got {seed_source!r}")
+    if seed_source == SEED_SOURCE_PHILOX:
+        for key in ('master_seed', 'pool_modulus'):
+            value = _nested_value(confs, ('isobar_samples', key, 'value'))
+            if not isinstance(value, int) or value <= 0:
+                errors.append(
+                    f"isobar_samples.{key}.value must be a positive integer "
+                    f"when seed_source is {SEED_SOURCE_PHILOX!r}")
 
     if errors:
         return errors
@@ -673,7 +733,8 @@ def main():
         conf_samples = confs['isobar_samples']
         n_configs = conf_samples['number_configs']['value']
         n_nucleons = conf_samples['number_nucleons']['value']
-        seeds_file = conf_samples['seeds_file']['filename']
+# Absent when seed_source is 'philox'; only the 'file' branch uses it.
+        seeds_file = _nested_value(conf_samples, ('seeds_file', 'filename'), '')
         out_dir = conf_samples['output_path']['dirname']
         # njobs = 1  # default to serial calculation
         # if 'number_of_parallel_processes' in conf_samples:
@@ -698,37 +759,67 @@ def main():
         print(f"Error: Could not create output directory {out_dir}: {exc}")
         sys.exit(1)
     
-    # Read only the rows this invocation needs. The previous form read the whole
-    # dataset (f['isobar_seeds'][:,:,:]) and sliced afterwards, which for the
-    # canonical 10000x300x6 pool costs ~430 ms of I/O per invocation -- paid
-    # twice per event -- to use a single row. The bounds checks and the
-    # "first A nucleons per row" semantics are unchanged.
-    try:
-        with h5py.File(seeds_file, 'r') as f:
-            dset = f['isobar_seeds']
-            nseeds = dset.shape[0]
-            start_configuration = 0
-            if 'start_configuration' in conf_samples:
-                start_configuration = conf_samples['start_configuration']['value']
+    # Seed rows come either from the shipped HDF5 pool or, by default now, from a
+    # deterministic counter-based generator. The latter removes the per-job
+    # transfer of the pool entirely and removes the finite-pool ceiling.
+    seed_source = str(_nested_value(conf_samples, ('seed_source', 'value'),
+                                    SEED_SOURCE_FILE)).strip().lower()
+    start_configuration = 0
+    if 'start_configuration' in conf_samples:
+        start_configuration = int(conf_samples['start_configuration']['value'])
+
+    if seed_source == SEED_SOURCE_PHILOX:
+        master_seed = _nested_value(conf_samples, ('master_seed', 'value'))
+        pool_modulus = _nested_value(conf_samples, ('pool_modulus', 'value'))
+        if master_seed is None or pool_modulus is None:
+            print("Error: seed_source 'philox' requires isobar_samples.master_seed "
+                  "and isobar_samples.pool_modulus.")
+            sys.exit(1)
+        pool_modulus = int(pool_modulus)
+        if start_configuration < 0 or start_configuration >= pool_modulus:
+            print(f"Error: start_configuration {start_configuration} out of "
+                  f"range [0, {pool_modulus})")
+            sys.exit(1)
+        seeds = generate_seed_rows(int(master_seed),
+                                   range(start_configuration,
+                                         start_configuration + n_configs),
+                                   n_nucleons)
+        if seeds.shape[0] < n_configs:
+            n_configs = seeds.shape[0]
+    elif seed_source == SEED_SOURCE_FILE:
+        # Read only the rows this invocation needs. The previous form read the
+        # whole dataset (f['isobar_seeds'][:,:,:]) and sliced afterwards, which
+        # for the canonical 10000x300x6 pool costs ~430 ms of I/O per
+        # invocation -- paid twice per event -- to use a single row. The bounds
+        # checks and the "first A nucleons per row" semantics are unchanged.
+        try:
+            with h5py.File(seeds_file, 'r') as f:
+                dset = f['isobar_seeds']
+                nseeds = dset.shape[0]
                 if start_configuration < 0 or start_configuration >= nseeds:
                     print(f"Error: start_configuration {start_configuration} out of range [0, {nseeds})")
                     sys.exit(1)
 
-            if dset.shape[1] < n_nucleons:
-                print(
-                    "Error: Requested number of nucleons per nucleus, A, is larger "
-                    "than the available seeds per row"
-                )
-                sys.exit(1)
+                if dset.shape[1] < n_nucleons:
+                    print(
+                        "Error: Requested number of nucleons per nucleus, A, is larger "
+                        "than the available seeds per row"
+                    )
+                    sys.exit(1)
 
-            seeds = np.array(
-                dset[start_configuration:start_configuration + n_configs, :n_nucleons, :])
-    except IOError:
-        print(f"Error: Could not read file {seeds_file}")
+                seeds = np.array(
+                    dset[start_configuration:start_configuration + n_configs,
+                         :n_nucleons, :])
+        except IOError:
+            print(f"Error: Could not read file {seeds_file}")
+            sys.exit(1)
+
+        if seeds.shape[0] < n_configs:
+            n_configs = seeds.shape[0]
+    else:
+        print(f"Error: unknown isobar_samples.seed_source {seed_source!r}; "
+              f"expected {SEED_SOURCE_FILE!r} or {SEED_SOURCE_PHILOX!r}.")
         sys.exit(1)
-
-    if seeds.shape[0] < n_configs:
-        n_configs = seeds.shape[0]
 
     n_isobars = 0
     isobars = []
