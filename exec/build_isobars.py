@@ -236,6 +236,52 @@ def Rst_w_from_WS(R,a):
 # together with the Woods-Saxon parameters they were derived from, so later events
 # in the same event folder reuse them. The signature guards against a stale cache:
 # if R_ws or a_ws differ, the values are recomputed.
+def generate_deformation_draws(master_seed, addresses):
+    """Standard-normal latents for the event-by-event deformation draw.
+
+    Returns an (n, 3) array of z-scores for (beta2, beta3, gamma).
+
+    Same discipline as the nucleon seeds: the z-scores depend only on
+    (master_seed, address) and never on a nuclear parameter. The design point
+    supplies the location and width, so every design point sees the *same*
+    z-score for a given event and differences between design points are purely
+    physical. Uses purpose=1, the upper half of the address' counter range, so
+    these draws are independent of the nucleon positions.
+    """
+    addresses = np.asarray(list(addresses), dtype=np.uint64)
+    draws = np.empty((addresses.size, 3), dtype=np.float64)
+    for i, address in enumerate(addresses):
+        counter = (np.uint64(address) * np.uint64(PHILOX_COUNTER_STRIDE) +
+                   np.uint64(1) * np.uint64(PHILOX_PURPOSE_STRIDE))
+        draws[i] = np.random.Generator(
+            np.random.Philox(key=master_seed, counter=counter)).standard_normal(3)
+    return draws
+
+
+def draw_deformation(z, beta2_mean, sigma_beta2, beta3_mean, sigma_beta3,
+                     gamma_mean, sigma_gamma):
+    """Map a latent z-score onto (beta2, gamma, beta3).
+
+    beta2 is a magnitude, so its normal draw is folded about zero; a negative
+    beta2 would describe the same shape as a positive one with gamma shifted by
+    pi, and folding keeps gamma interpretable. beta3 is signed and left alone
+    -- its sign is physical (prolate/oblate octupole).
+
+    gamma lives on a circle of period 2*pi, so its draw is a *wrapped* normal
+    rather than a plain one: wrapping is what makes the distribution genuinely
+    circular, with no artificial edge at 0/2pi. A wrapped normal and a von
+    Mises agree to leading order at small width; the wrapped form is used
+    because it degenerates cleanly to a fixed gamma as sigma_gamma -> 0, which
+    keeps the fixed-deformation design point inside the same parameterisation
+    (a von Mises would need kappa -> infinity instead).
+    """
+    beta2 = abs(beta2_mean + sigma_beta2 * z[0]) if sigma_beta2 > 0 else beta2_mean
+    beta3 = beta3_mean + sigma_beta3 * z[1] if sigma_beta3 > 0 else beta3_mean
+    gamma = ((gamma_mean + sigma_gamma * z[2]) % (2.0 * np.pi)
+             if sigma_gamma > 0 else gamma_mean)
+    return beta2, gamma, beta3
+
+
 _STEP_CACHE_KEY = '_step_gaussian_cache'
 
 # Memoised deformation ODE solutions, keyed on (R_ws, a_ws). See the call site.
@@ -786,6 +832,12 @@ def main():
                                    n_nucleons)
         if seeds.shape[0] < n_configs:
             n_configs = seeds.shape[0]
+        # Deformation latents are keyed on the same index (a pool address under
+        # 'philox', a row under 'file'), so a given configuration always keeps
+        # the same shape draw whichever source supplied its nucleon positions.
+        deform_draws = generate_deformation_draws(
+            int(master_seed), range(start_configuration,
+                                    start_configuration + n_configs))
     elif seed_source == SEED_SOURCE_FILE:
         # Read only the rows this invocation needs. The previous form read the
         # whole dataset (f['isobar_seeds'][:,:,:]) and sliced afterwards, which
@@ -816,6 +868,10 @@ def main():
 
         if seeds.shape[0] < n_configs:
             n_configs = seeds.shape[0]
+        master_seed = _nested_value(conf_samples, ('master_seed', 'value'), 0)
+        deform_draws = generate_deformation_draws(
+            int(master_seed), range(start_configuration,
+                                    start_configuration + n_configs))
     else:
         print(f"Error: unknown isobar_samples.seed_source {seed_source!r}; "
               f"expected {SEED_SOURCE_FILE!r} or {SEED_SOURCE_PHILOX!r}.")
@@ -922,6 +978,22 @@ def main():
                 raise Exception('correlation_extremum/correlation_strength cannot be smaller than -1')
                     
             # print(f'{correlation_extremum=}, {correlation_volume=}') 
+            # Event-by-event deformation widths. Absent or zero means the
+            # design point is a fixed shape, i.e. exactly the previous
+            # behaviour.
+            sigma_beta2 = float(
+                _nested_value(isobar_conf, ('sigma_beta_2', 'value'), 0.0))
+            sigma_beta3 = float(
+                _nested_value(isobar_conf, ('sigma_beta_3', 'value'), 0.0))
+            sigma_gamma = float(
+                _nested_value(isobar_conf, ('sigma_gamma', 'value'), 0.0))
+            if ((sigma_beta2 > 0 or sigma_beta3 > 0 or sigma_gamma > 0)
+                    and 'master_seed' not in conf_samples):
+                print("Error: sigma_beta_2 / sigma_beta_3 / sigma_gamma "
+                      "require isobar_samples.master_seed so the shape draw is "
+                      "reproducible.")
+                sys.exit(1)
+
             isobars.append({
                 'name': isobar_conf['isobar_name'],
                 'R_ws': R_ws,
@@ -932,6 +1004,9 @@ def main():
                 'gamma': gamma,
                 'beta3': beta3,
                 'beta4': beta4,
+                'sigma_beta2': sigma_beta2,
+                'sigma_beta3': sigma_beta3,
+                'sigma_gamma': sigma_gamma,
                 'correlation_volume': correlation_volume,
                 'correlation_extremum': correlation_extremum,
                 'realistic_correlation': realistic_correlation,
@@ -971,7 +1046,11 @@ def main():
         # single isobar per invocation this is a no-op, but it makes a second
         # isobar sharing the shape parameters free, and it is what will keep the
         # per-event deformation draws of a later phase affordable.
-        if (beta2 != 0 or beta3 != 0 or beta4 != 0):
+        sigma_beta2 = isobar_config['sigma_beta2']
+        sigma_beta3 = isobar_config['sigma_beta3']
+        sigma_gamma = isobar_config['sigma_gamma']
+        fluctuate = sigma_beta2 > 0 or sigma_beta3 > 0 or sigma_gamma > 0
+        if fluctuate or (beta2 != 0 or beta3 != 0 or beta4 != 0):
             cached = _DEFORM_SOLVE_CACHE.get((R_ws, a_ws))
             if cached is None:
                 print(f'Solving differential equation for angular deformation.  {R_ws=} {a_ws=}')
@@ -1069,20 +1148,68 @@ def main():
         # Parallel dispatch below was pure overhead -- ~135 ms of pool setup and
         # pickling of the interp1d objects per invocation. Call directly in that
         # case and keep joblib only when there is real work to parallelise.
-        build_args = (n_nucleons, isobar_config, avgprob, f2, fp2, f3, fp3,
-                      f4, fp4, corr_shift_interp)
+        #
+        # When deformation widths are set, each configuration gets its own
+        # (beta2, gamma, beta3) from its latent z-score. The z-score is fixed by
+        # (master_seed, address) alone, so the shape a design point gives a
+        # given event is reproducible and comparable across design points.
+        def config_for(s):
+            if not fluctuate:
+                return isobar_config
+            cfg = dict(isobar_config)
+            b2, gm, b3 = draw_deformation(deform_draws[s], beta2, sigma_beta2,
+                                          beta3, sigma_beta3, gamma,
+                                          sigma_gamma)
+            cfg['beta2'], cfg['gamma'], cfg['beta3'] = b2, gm, b3
+            return cfg
+
         if n_configs == 1:
-            data = np.array([build_nucleus(seeds[0], *build_args)])
+            data = np.array([
+                build_nucleus(seeds[0], n_nucleons, config_for(0), avgprob, f2,
+                              fp2, f3, fp3, f4, fp4, corr_shift_interp)
+            ])
         else:
             data = Parallel(n_jobs=njobs)(
-                delayed(build_nucleus)(seeds[s], *build_args)
+                delayed(build_nucleus)(seeds[s], n_nucleons, config_for(s),
+                                       avgprob, f2, fp2, f3, fp3, f4, fp4,
+                                       corr_shift_interp)
                 for s in range(n_configs))
+
+        # Record the shape actually realised, so an emulator can join results to
+        # the deformation that produced them.
+        if fluctuate:
+            realized = np.array([
+                draw_deformation(deform_draws[s], beta2, sigma_beta2, beta3,
+                                 sigma_beta3, gamma, sigma_gamma)
+                for s in range(n_configs)
+            ])
+            print('realized deformation (beta2, gamma, beta3) over '
+                  f'{n_configs} configuration(s): '
+                  f'beta2[{realized[:, 0].min():.4f}, {realized[:, 0].max():.4f}] '
+                  f'gamma[{realized[:, 1].min():.4f}, {realized[:, 1].max():.4f}] '
+                  f'beta3[{realized[:, 2].min():.4f}, {realized[:, 2].max():.4f}]')
+        else:
+            realized = np.tile(
+                np.array([[beta2, gamma, beta3]]), (n_configs, 1))
 #         for s in range(n_configs):
 #             data[s,:,:] = build_nucleus(seeds[s],n_nucleons,*isobars[isobar],f2,fp2,f3,fp3)
     
         with h5py.File(out_dir+'/'+isobar_config['name']+'.hdf', 'w') as f:
             data_set = f.create_dataset(isobar_config['name'],(n_configs,n_nucleons,3))
-            data_set[:] = data 
+            data_set[:] = data
+            # The shape actually applied, one row per configuration, so results
+            # stay joinable to the deformation that produced them. Columns are
+            # beta2, gamma, beta3.
+            f.create_dataset('deformation',
+                             (n_configs, 3),
+                             data=np.asarray(realized, dtype=np.float64))
+            f.attrs['master_seed'] = int(
+                _nested_value(conf_samples, ('master_seed', 'value'), 0))
+            f.attrs['start_configuration'] = int(start_configuration)
+            f.attrs['seed_source'] = seed_source
+            f.attrs['sigma_beta2'] = float(sigma_beta2)
+            f.attrs['sigma_beta3'] = float(sigma_beta3)
+            f.attrs['sigma_gamma'] = float(sigma_gamma)
             
 #%%
 if __name__ == "__main__":
