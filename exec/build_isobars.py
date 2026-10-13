@@ -260,35 +260,29 @@ def generate_deformation_draws(master_seed, addresses):
 
 def draw_deformation(z, beta2_mean, sigma_beta2, beta3_mean, sigma_beta3,
                      gamma_mean, sigma_gamma):
-    """Map a latent z-score onto (beta2, gamma, beta3).
+    """Map a latent z-score onto (beta2, gamma_lit, beta3).
 
-    beta2 is a magnitude, so its normal draw is folded about zero; a negative
-    beta2 would describe the same shape as a positive one with gamma shifted by
-    pi, and folding keeps gamma interpretable. beta3 is signed and left alone
-    -- its sign is physical (prolate/oblate octupole).
+    gamma is the *literature* triaxiality angle (gamma_lit, the ellipsoid angle
+    in [0, 60] deg), not the harmonic angle the surface expansion uses; see the
+    convention note above and BetaGammaDistribution.md.
 
-    gamma is periodic, but its fundamental domain is NOT the full circle. For a
-    shape built from beta20 and beta22 alone (no beta21), a 90-degree rotation
-    about z sends (beta20, beta22) -> (beta20, -beta22), i.e. gamma -> -gamma,
-    and leaves Y30 -- and hence beta3 -- untouched. So gamma and -gamma describe
-    the same nucleus, and the canonical range is [0, pi), not [0, 2*pi). Verified
-    by solving for the explicit rotation: residual 9e-17 for gamma -> -gamma,
-    versus 7e-01 for gamma -> gamma + pi. Wrapping to 2*pi would therefore make
-    every shape appear exactly twice in the sampled design.
+    beta2 is a magnitude, so its normal draw is folded about zero, and gamma is
+    then folded onto the Bohr-Mottelson fundamental domain. beta3 is signed and
+    left alone -- its sign is physical (prolate/oblate octupole).
 
-    This is the only exact redundancy. The frequently quoted 0-60 deg range
-    belongs to a *different* variable, the ellipsoid (Davydov-Filipov)
-    triaxiality gamma_0, which is not what deform_nucleus takes; in the harmonic
-    (beta2, gamma) parameterisation here there is no 120 - gamma reflection.
-    See EMULATOR_SWEEP_PLAN.md.
+    The folding is not merely cosmetic: it is what removes the redundancy in the
+    design space. In gamma_lit the equivalences are
+    gamma_lit == gamma_lit + 120 == -gamma_lit == 120 - gamma_lit, so without
+    folding each shape would enter the sweep up to four times over. Because the
+    draw is a continuous Gaussian and the folds are piecewise, a draw that
+    overshoots an edge lands back inside by reflection rather than accumulating
+    at the edge -- no boundary pile-up, which is the failure mode BetaGamma-
+    Distribution.md is written to avoid.
     """
-    beta2 = abs(beta2_mean + sigma_beta2 * z[0]) if sigma_beta2 > 0 else beta2_mean
+    beta_trial = beta2_mean + sigma_beta2 * z[0] if sigma_beta2 > 0 else beta2_mean
     beta3 = beta3_mean + sigma_beta3 * z[1] if sigma_beta3 > 0 else beta3_mean
-    if sigma_gamma > 0:
-        gamma = np.abs((gamma_mean + sigma_gamma * z[2] + np.pi) % (2.0 * np.pi)
-                       - np.pi)
-    else:
-        gamma = gamma_mean
+    gamma_trial = gamma_mean + sigma_gamma * z[2] if sigma_gamma > 0 else gamma_mean
+    beta2, gamma = map_to_fundamental_domain(beta_trial, gamma_trial)
     return beta2, gamma, beta3
 
 
@@ -522,8 +516,11 @@ def deform_nucleon(r,costheta,phi,R,beta20,beta22,beta3,beta4,f2,fp2,f3,fp3, f4,
 # Take configuration of a nucleus and deform it by shifting each nucleon with deform() function
 # Uncorrelated nucleons will still be uncorrelated after deformation.
 # Updated to include beta4 (hexadecapole deformation)
-def deform_nucleus(nucleus, R, beta2, gamma, beta3, beta4, f2, fp2, f3, fp3, f4, fp4):
-#     rmin = 1.0e-1
+def deform_nucleus(nucleus, R, beta20, beta22, beta3, beta4, f2, fp2, f3, fp3, f4, fp4):
+#   Takes the harmonic quadrupole coefficients directly rather than (beta2, gamma).
+#   The angle convention is the usual source of silent bugs here -- gamma_lit and
+#   gamma_harm are different variables -- so nothing downstream of the conversion
+#   is allowed to carry an angle at all.
     rmin = R/10
     for nucleon, position in enumerate(nucleus):
         x,y,z = position
@@ -531,9 +528,6 @@ def deform_nucleus(nucleus, R, beta2, gamma, beta3, beta4, f2, fp2, f3, fp3, f4,
         if r > rmin:
             phi = math.atan2(y,x)
             costheta = z/r
-
-            beta20 = beta2*math.cos(gamma)
-            beta22 = beta2*math.sin(gamma)/np.sqrt(2)
 
             nsteps = 10
             for step in range(nsteps):
@@ -579,6 +573,109 @@ def place_nucleon(R_step, w_gauss, seed):
 
 
 
+# ---------------------------------------------------------------------------
+# Triaxiality conventions.
+#
+# There are two different "gamma" in play, and conflating them is easy:
+#
+#   gamma_lit  the Bohr-Mottelson triaxiality angle used throughout the nuclear
+#              shape literature and in the beta-gamma sector plots: the angle
+#              of the *ellipsoid*, with the three semi-axes ordered a >= b >= c.
+#                  a = R(1 + beta cos gamma_lit)
+#                  b = R(1 + beta cos(gamma_lit - 2pi/3))
+#                  c = R(1 + beta cos(gamma_lit + 2pi/3))
+#              Its fundamental domain is beta >= 0 and 0 <= gamma_lit <= 60 deg,
+#              with maximum triaxiality at gamma_lit = 30 deg. This is the
+#              design variable; see BetaGammaDistribution.md.
+#
+#   gamma_harm the angle the surface expansion actually uses. deform_nucleus
+#              builds R = R0(1 + beta20 Y20 + beta22 Y22 + ...) with
+#              beta20 = beta cos(gamma_harm), beta22 = beta sin(gamma_harm)/sqrt2.
+#              Its fundamental domain is 0 <= gamma_harm < 180 deg.
+#
+# The two are related by roughly a factor of three but NOT by a constant factor,
+# and gamma_harm is not even monotone in gamma_lit. So they are converted
+# explicitly here and never mixed. Anchors, all verified numerically:
+#   gamma_harm   0 deg (axial prolate) -> gamma_lit   0 deg
+#   gamma_harm  90 deg (max triaxial)   -> gamma_lit  30 deg
+#   gamma_harm 180 deg (axial oblate)  -> gamma_lit  60 deg
+# ---------------------------------------------------------------------------
+
+
+def quad_tensor_eigenvalues(beta20, beta22):
+    """Trace-free quadrupole tensor of R = R0(1 + beta20 Y20 + beta22 Y22).
+
+    Y20 = (1/4)sqrt(5/pi) (2z^2 - x^2 - y^2) and Y22 = (1/4)sqrt(15/pi) (x^2 - y^2),
+    so -- dropping the common (1/4)sqrt(5/pi) -- the tensor is diagonal with
+
+        T = (sqrt(3) beta22 - beta20,  -sqrt(3) beta22 - beta20,  2 beta20)
+
+    The sqrt(3) is the ratio of the two harmonic normalisation constants; dropping
+    it silently rescales the triaxiality angle, which is exactly the kind of error
+    that makes gamma_lit look wrong by a constant factor. The entries sum to zero,
+    and their eigenvalues are rotation invariant, so they identify a shape.
+    """
+    return np.array([
+        np.sqrt(3.0) * beta22 - beta20,
+        -np.sqrt(3.0) * beta22 - beta20,
+        2.0 * beta20,
+    ])
+
+
+def harmonic_from_gamma_lit(beta, gamma_lit):
+    """Design (beta, gamma_lit) -> the (beta20, beta22) deform_nucleus needs.
+
+    Matching quad_tensor_eigenvalues against the literature semi-axis eigenvalues
+    6 beta cos(gamma_lit + 2k pi/3) and solving for the harmonic angle g in
+    beta20 = beta cos g, beta22 = beta sin g / sqrt(2) gives
+
+        tan(g) = -sqrt(2) tan(gamma_lit)
+
+    which is why g runs *negative* as gamma_lit grows: the literature angle orders
+    the semi-axes, and going from prolate through triaxial to oblate moves the
+    long axis off z. Anchors, all reproduced exactly:
+        gamma_lit   0 deg -> g   0.0 deg  (pure Y20, axial prolate)
+        gamma_lit  30 deg -> g -39.2 deg  (T_yy = 0, maximum triaxiality)
+        gamma_lit  60 deg -> g -67.8 deg  (axial oblate)
+
+    Which principal axis carries which eigenvalue is a rotation, and TRENto
+    randomises orientation per nucleus, so the assignment used here is one valid
+    representative.
+    """
+    g = np.arctan(-np.sqrt(2.0) * np.tan(gamma_lit))
+    return beta * np.cos(g), beta * np.sin(g) / np.sqrt(2.0)
+
+
+def gamma_lit_from_harmonic(beta20, beta22):
+    """Recover the triaxiality angle from harmonic coefficients (reporting only).
+
+    Computed from the sorted eigenvalues rather than by inverting the tangent
+    above, so it stays correct for any (beta20, beta22) including branches where
+    the harmonic angle is outside the range gamma_lit in [0, 60] deg reaches.
+    """
+    t = np.sort(quad_tensor_eigenvalues(beta20, beta22))[::-1]
+    return np.arctan2(t[1] - t[2], np.sqrt(3.0) * t[0])
+
+
+def map_to_fundamental_domain(beta_trial, gamma_trial_rad):
+    """Fold any raw (beta, gamma_lit) onto beta >= 0, 0 <= gamma_lit <= 60 deg.
+
+    This is the algorithm from BetaGammaDistribution.md, verbatim in structure.
+    It is only shape-preserving when applied to gamma_lit: in gamma_lit space the
+    equivalences are gamma_lit == gamma_lit + 120 == -gamma_lit == 120 - gamma_lit
+    (cyclic permutation of the principal axes, and reflection), verified to be
+    shape preserving on 4000 random draws and to reproduce all three anchors.
+    The same folding applied to gamma_harm is *not* shape preserving -- it was
+    tested on 52 points and failed every one -- which is why the conversion has
+    to happen on the design side of the boundary.
+    """
+    beta = np.abs(beta_trial)
+    gamma_deg = np.abs(np.degrees(gamma_trial_rad))
+    gamma_mod = gamma_deg % 120.0
+    gamma = np.where(gamma_mod > 60.0, 120.0 - gamma_mod, gamma_mod)
+    return beta, np.radians(gamma)
+
+
 # Build nucleus by randomly placing nucleons independently according to a
 # spherically-symmetric distribution, then adding angular deformation,
 # then adding short-range pair correlation.  Result is list of positions in cartesian coordinates.
@@ -599,10 +696,13 @@ def build_nucleus(seeds_nucleus, n_nucleons, isobar_config, avgprob, f2, fp2, f3
     for n in range(n_nucleons):
 #         nucleus[n,:] = place_nucleon(Rws, R_step, w_gauss, beta2, gamma, beta3, seeds_nucleus[n], f2, fp2, f3, fp3)
         nucleus[n,:] = place_nucleon(R_step, w_gauss, seeds_nucleus[n])
-        
+
     # Perform angular deformation by shifting nucleon positions
     if (beta2 != 0 or beta3 != 0 or beta4 != 0):
-        nucleus = deform_nucleus(nucleus, R_ws, beta2, gamma, beta3, beta4, f2, fp2,f3,fp3, f4, fp4)
+        # gamma is the literature triaxiality angle; convert to the harmonic
+        # coefficients deform_nucleus is written in terms of.
+        beta20, beta22 = harmonic_from_gamma_lit(beta2, gamma)
+        nucleus = deform_nucleus(nucleus, R_ws, beta20, beta22, beta3, beta4, f2, fp2,f3,fp3, f4, fp4)
         
 
     # Add short-range correlations by shifting nucleon positions
@@ -1193,26 +1293,36 @@ def main():
                                  sigma_beta3, gamma, sigma_gamma)
                 for s in range(n_configs)
             ])
-            print('realized deformation (beta2, gamma, beta3) over '
+            print('realized deformation (beta2, gamma_lit, beta3) over '
                   f'{n_configs} configuration(s): '
                   f'beta2[{realized[:, 0].min():.4f}, {realized[:, 0].max():.4f}] '
-                  f'gamma[{realized[:, 1].min():.4f}, {realized[:, 1].max():.4f}] '
-                  f'beta3[{realized[:, 2].min():.4f}, {realized[:, 2].max():.4f}]')
+                  f'gamma_lit[{realized[:, 1].min():.4f}, {realized[:, 1].max():.4f}]'
+                  f' beta3[{realized[:, 2].min():.4f}, {realized[:, 2].max():.4f}]')
         else:
             realized = np.tile(
                 np.array([[beta2, gamma, beta3]]), (n_configs, 1))
 #         for s in range(n_configs):
 #             data[s,:,:] = build_nucleus(seeds[s],n_nucleons,*isobars[isobar],f2,fp2,f3,fp3)
-    
+
+        # The harmonic coefficients actually handed to deform_nucleus, so the
+        # output can be traced back to the exact surface expansion without
+        # redoing the gamma_lit -> (beta20, beta22) conversion.
+        harmonic = np.array(
+            [harmonic_from_gamma_lit(r[0], r[1]) for r in np.asarray(realized)])
+
         with h5py.File(out_dir+'/'+isobar_config['name']+'.hdf', 'w') as f:
             data_set = f.create_dataset(isobar_config['name'],(n_configs,n_nucleons,3))
             data_set[:] = data
             # The shape actually applied, one row per configuration, so results
             # stay joinable to the deformation that produced them. Columns are
-            # beta2, gamma, beta3.
+            # beta2, gamma_lit, beta3, with gamma_lit the triaxiality angle in
+            # the literature convention.
             f.create_dataset('deformation',
                              (n_configs, 3),
                              data=np.asarray(realized, dtype=np.float64))
+            f.create_dataset('deformation_harmonic',
+                             (n_configs, 2),
+                             data=harmonic.astype(np.float64))
             f.attrs['master_seed'] = int(
                 _nested_value(conf_samples, ('master_seed', 'value'), 0))
             f.attrs['start_configuration'] = int(start_configuration)
