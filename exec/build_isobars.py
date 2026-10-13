@@ -1580,12 +1580,19 @@ def main():
             # stay joinable to the deformation that produced them. Columns are
             # beta2, gamma_lit, beta3, with gamma_lit the triaxiality angle in
             # the literature convention.
-            f.create_dataset('deformation',
-                             (n_configs, 3),
-                             data=np.asarray(realized, dtype=np.float64))
-            f.create_dataset('deformation_harmonic',
-                             (n_configs, 2),
-                             data=harmonic.astype(np.float64))
+            #
+            # These are ATTRIBUTES, not datasets. TRENTo's ManualNucleus::create
+            # requires the nucleus file to hold exactly one object
+            # (nucleus.cxx: `if (file.getNumObjs() != 1) throw`), so adding a
+            # sibling dataset makes TRENTo reject the file outright with
+            # "must contain exactly one object". Attributes hang off the root
+            # group and are not objects, so they ride along without tripping
+            # that check. Provenance as datasets was silently breaking the whole
+            # chain from the day it was added.
+            f.attrs.create('deformation',
+                           np.asarray(realized, dtype=np.float64))
+            f.attrs.create('deformation_harmonic',
+                           harmonic.astype(np.float64))
             f.attrs['master_seed'] = int(
                 _nested_value(conf_samples, ('master_seed', 'value'), 0))
             f.attrs['start_configuration'] = int(start_configuration)
