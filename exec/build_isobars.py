@@ -38,6 +38,7 @@ from joblib import Parallel, delayed
 from scipy.interpolate import interp1d
 from scipy.integrate import solve_ivp
 from scipy.optimize import minimize
+from scipy.stats import beta as _beta_dist
 from mpmath import polylog
 
 # from scipy.optimize import brentq
@@ -236,6 +237,34 @@ def Rst_w_from_WS(R,a):
 # together with the Woods-Saxon parameters they were derived from, so later events
 # in the same event folder reuse them. The signature guards against a stale cache:
 # if R_ws or a_ws differ, the values are recomputed.
+def generate_shape_uniforms(master_seed, addresses):
+    """Uniform latents for the bounded Beta deformation draw.
+
+    Returns an (n, 2) array of uniforms for (beta, gamma_lit). Same discipline as
+    generate_deformation_draws: the values depend only on (master_seed, address)
+    and never on a nuclear parameter, so every design point sees the same u for a
+    given event and differences between design points stay purely physical.
+
+    This is what lets BetaGammaDistribution.md section 3 Option B coexist with
+    common random numbers. Option B nominally draws u ~ Beta(alpha, beta), but
+    Beta draws are not reproducible from a counter. Drawing a Philox uniform and
+    pushing it through the Beta inverse CDF gives the same distribution while
+    keeping the latent shared, so common randomness is preserved.
+
+    Uses purpose=2, above the nucleon seeds (purpose=0) and the normal latents
+    (purpose=1), so all three streams are independent.
+    """
+    addresses = np.asarray(list(addresses), dtype=np.uint64)
+    draws = np.empty((addresses.size, 2), dtype=np.float64)
+    for i, address in enumerate(addresses):
+        counter = (np.uint64(address) * np.uint64(PHILOX_COUNTER_STRIDE) +
+                   np.uint64(2) * np.uint64(PHILOX_PURPOSE_STRIDE))
+        draws[i] = np.random.Generator(
+            np.random.Philox(key=master_seed,
+                             counter=counter)).random(2)
+    return draws
+
+
 def generate_deformation_draws(master_seed, addresses):
     """Standard-normal latents for the event-by-event deformation draw.
 
@@ -258,32 +287,98 @@ def generate_deformation_draws(master_seed, addresses):
     return draws
 
 
-def draw_deformation(z, beta2_mean, sigma_beta2, beta3_mean, sigma_beta3,
-                     gamma_mean, sigma_gamma):
-    """Map a latent z-score onto (beta2, gamma_lit, beta3).
+def beta_shape_params(mu, sigma, lo, hi, name):
+    """Moment-matched Beta (alpha, beta) for a target mean and sd on [lo, hi].
 
-    gamma is the *literature* triaxiality angle (gamma_lit, the ellipsoid angle
-    in [0, 60] deg), not the harmonic angle the surface expansion uses; see the
-    convention note above and BetaGammaDistribution.md.
+    BetaGammaDistribution.md section 3 gives
+        alpha = mu (mu(1-mu)/sigma^2 - 1),  beta = (1-mu)(mu(1-mu)/sigma^2 - 1)
+    on a normalised variable; here mu and sigma are in physical units, so they
+    are mapped onto [lo, hi] first.
 
-    beta2 is a magnitude, so its normal draw is folded about zero, and gamma is
-    then folded onto the Bohr-Mottelson fundamental domain. beta3 is signed and
-    left alone -- its sign is physical (prolate/oblate octupole).
-
-    The folding is not merely cosmetic: it is what removes the redundancy in the
-    design space. In gamma_lit the equivalences are
-    gamma_lit == gamma_lit + 120 == -gamma_lit == 120 - gamma_lit, so without
-    folding each shape would enter the sweep up to four times over. Because the
-    draw is a continuous Gaussian and the folds are piecewise, a draw that
-    overshoots an edge lands back inside by reflection rather than accumulating
-    at the edge -- no boundary pile-up, which is the failure mode BetaGamma-
-    Distribution.md is written to avoid.
+    The uniform limit is reachable, which is the point of being able to tune to
+    it: Beta(1, 1) has mean 1/2 and sd 1/sqrt(12), so a uniform prior over
+    [lo, hi] is mu = (lo+hi)/2 with sigma = (hi-lo)/sqrt(12).
     """
-    beta_trial = beta2_mean + sigma_beta2 * z[0] if sigma_beta2 > 0 else beta2_mean
-    beta3 = beta3_mean + sigma_beta3 * z[1] if sigma_beta3 > 0 else beta3_mean
-    gamma_trial = gamma_mean + sigma_gamma * z[2] if sigma_gamma > 0 else gamma_mean
-    beta2, gamma = map_to_fundamental_domain(beta_trial, gamma_trial)
-    return beta2, gamma, beta3
+    span = hi - lo
+    m = (mu - lo) / span
+    s = sigma / span
+    if not (0.0 < m < 1.0):
+        raise ValueError(f"{name}: mean {mu} is outside [{lo}, {hi}]")
+    k = m * (1.0 - m) / (s * s) - 1.0
+    if k <= 0.0:
+        raise ValueError(
+            f"{name}: sigma {sigma} is too wide for mean {mu} on [{lo}, {hi}]. "
+            f"A Beta on a bounded interval needs sigma^2 < mu(1-mu) in "
+            f"normalised units, i.e. sigma < {np.sqrt(m * (1.0 - m)) * span:.4g} "
+            f"here. Raise beta_max or narrow sigma.")
+    return m * k, (1.0 - m) * k
+
+
+# Quadrupole strength is bounded so the deformation draw has no infinite tail,
+# per BetaGammaDistribution.md section 3 Option B. 0.5 is far beyond any ground
+# state (realistic values are ~0.1-0.3) while still describing a plausible
+# nucleus, and it makes the uniform wedge prior
+# mu = beta_max/2 = 0.25, sigma = beta_max/sqrt(12) = 0.144.
+DEFAULT_BETA_MAX = 0.5
+
+# Gamma is drawn over the double domain [0, 120] deg so that folding actually
+# exercises both edges, as section 3 Option B asks; the section 4 fold then maps
+# it into [0, 60].
+GAMMA_DOUBLE_DOMAIN_DEG = 120.0
+
+
+def draw_deformation(u, z_beta3, beta2_mean, sigma_beta2, beta3_mean,
+                     sigma_beta3, gamma_mean, sigma_gamma, beta_max):
+    """Map shared latents onto (beta, gamma_lit, beta3), vectorised over configs.
+
+    u is the (n, 2) uniform latent array for (beta, gamma_lit) and z_beta3 the
+    (n,) normal latent for the octupole. Both are functions of (master_seed,
+    address) only -- see generate_shape_uniforms -- so all design points share
+    them and the sweep stays a common-random-numbers design.
+
+    Beta and gamma use the bounded Beta of section 3 Option B: uniform latent ->
+    Beta inverse CDF -> physical value. Gamma is drawn over [0, 120] deg and then
+    folded by map_to_fundamental_domain, so the draw genuinely crosses the edges
+    instead of being clipped at them.
+
+    beta3 stays Gaussian. Octupole deformation is signed and has no bounded
+    domain to fold onto, and section 3 concerns (beta, gamma) only; sigma_beta3 = 0
+    still means a fixed octupole.
+
+    A zero sigma means "no fluctuation" for each of the three and passes the
+    design-point mean through unchanged, which is what the shipped design points
+    rely on.
+    """
+    u = np.atleast_2d(np.asarray(u, dtype=np.float64))
+    z_beta3 = np.atleast_1d(np.asarray(z_beta3, dtype=np.float64))
+    n = max(u.shape[0], z_beta3.shape[0])
+
+    if sigma_beta2 > 0:
+        a1, b1 = beta_shape_params(beta2_mean, sigma_beta2, 0.0, beta_max,
+                                   "beta_2")
+        beta_trial = beta_max * _beta_dist.ppf(np.clip(u[:, 0], 0.0, 1.0), a1, b1)
+    else:
+        beta_trial = np.full(n, beta2_mean, dtype=np.float64)
+
+    if sigma_gamma > 0:
+        # gamma_mean and sigma_gamma are in radians everywhere in this codebase,
+        # so normalise against the double domain in radians too. Mixing the two
+        # silently puts the mean near 0 and the draw collapses to the edge.
+        a2, b2 = beta_shape_params(gamma_mean, sigma_gamma, 0.0,
+                                   np.radians(GAMMA_DOUBLE_DOMAIN_DEG),
+                                   "gamma_lit")
+        gamma_trial = (np.radians(GAMMA_DOUBLE_DOMAIN_DEG) *
+                       _beta_dist.ppf(np.clip(u[:, 1], 0.0, 1.0), a2, b2))
+    else:
+        gamma_trial = np.full(n, gamma_mean, dtype=np.float64)
+
+    if sigma_beta3 > 0:
+        beta3 = beta3_mean + sigma_beta3 * z_beta3
+    else:
+        beta3 = np.full(n, beta3_mean, dtype=np.float64)
+
+    beta, gamma = map_to_fundamental_domain(beta_trial, gamma_trial)
+    return beta, gamma, beta3
 
 
 _STEP_CACHE_KEY = '_step_gaussian_cache'
@@ -945,9 +1040,12 @@ def main():
         # Deformation latents are keyed on the same index (a pool address under
         # 'philox', a row under 'file'), so a given configuration always keeps
         # the same shape draw whichever source supplied its nucleon positions.
-        deform_draws = generate_deformation_draws(
-            int(master_seed), range(start_configuration,
-                                    start_configuration + n_configs))
+        shape_addresses = range(start_configuration,
+                                start_configuration + n_configs)
+        deform_draws = generate_deformation_draws(int(master_seed),
+                                                  shape_addresses)
+        shape_uniforms = generate_shape_uniforms(int(master_seed),
+                                                  shape_addresses)
     elif seed_source == SEED_SOURCE_FILE:
         # Read only the rows this invocation needs. The previous form read the
         # whole dataset (f['isobar_seeds'][:,:,:]) and sliced afterwards, which
@@ -979,9 +1077,12 @@ def main():
         if seeds.shape[0] < n_configs:
             n_configs = seeds.shape[0]
         master_seed = _nested_value(conf_samples, ('master_seed', 'value'), 0)
-        deform_draws = generate_deformation_draws(
-            int(master_seed), range(start_configuration,
-                                    start_configuration + n_configs))
+        shape_addresses = range(start_configuration,
+                                start_configuration + n_configs)
+        deform_draws = generate_deformation_draws(int(master_seed),
+                                                  shape_addresses)
+        shape_uniforms = generate_shape_uniforms(int(master_seed),
+                                                  shape_addresses)
     else:
         print(f"Error: unknown isobar_samples.seed_source {seed_source!r}; "
               f"expected {SEED_SOURCE_FILE!r} or {SEED_SOURCE_PHILOX!r}.")
@@ -1097,6 +1198,12 @@ def main():
                 _nested_value(isobar_conf, ('sigma_beta_3', 'value'), 0.0))
             sigma_gamma = float(
                 _nested_value(isobar_conf, ('sigma_gamma', 'value'), 0.0))
+            beta_max = float(
+                _nested_value(isobar_conf, ('beta_max', 'value'),
+                              DEFAULT_BETA_MAX))
+            if beta_max <= 0:
+                raise ValueError(
+                    f"beta_max must be positive, got {beta_max}")
             if ((sigma_beta2 > 0 or sigma_beta3 > 0 or sigma_gamma > 0)
                     and 'master_seed' not in conf_samples):
                 print("Error: sigma_beta_2 / sigma_beta_3 / sigma_gamma "
@@ -1260,17 +1367,34 @@ def main():
         # case and keep joblib only when there is real work to parallelise.
         #
         # When deformation widths are set, each configuration gets its own
-        # (beta2, gamma, beta3) from its latent z-score. The z-score is fixed by
-        # (master_seed, address) alone, so the shape a design point gives a
-        # given event is reproducible and comparable across design points.
+        # (beta2, gamma_lit, beta3) from its shared latents. Those latents are
+        # fixed by (master_seed, address) alone, so the shape a design point
+        # gives a given event is reproducible and comparable across design
+        # points -- the common-random-numbers property the sweep relies on.
+        # Realise every configuration's shape once, up front. The nuclei below
+        # and the provenance written after them both read from this single
+        # array, so they cannot disagree about what shape was actually applied.
+        if fluctuate:
+            realized = np.column_stack(
+                draw_deformation(shape_uniforms[:n_configs],
+                                 deform_draws[:n_configs, 1], beta2,
+                                 sigma_beta2, beta3, sigma_beta3, gamma,
+                                 sigma_gamma, beta_max))
+            print('realized deformation (beta2, gamma_lit, beta3) over '
+                  f'{n_configs} configuration(s): '
+                  f'beta2[{realized[:, 0].min():.4f}, {realized[:, 0].max():.4f}] '
+                  f'gamma_lit[{realized[:, 1].min():.4f}, {realized[:, 1].max():.4f}]'
+                  f' beta3[{realized[:, 2].min():.4f}, {realized[:, 2].max():.4f}]')
+        else:
+            realized = np.tile(np.array([[beta2, gamma, beta3]]), (n_configs, 1))
+
         def config_for(s):
             if not fluctuate:
                 return isobar_config
             cfg = dict(isobar_config)
-            b2, gm, b3 = draw_deformation(deform_draws[s], beta2, sigma_beta2,
-                                          beta3, sigma_beta3, gamma,
-                                          sigma_gamma)
-            cfg['beta2'], cfg['gamma'], cfg['beta3'] = b2, gm, b3
+            cfg['beta2'] = float(realized[s, 0])
+            cfg['gamma'] = float(realized[s, 1])
+            cfg['beta3'] = float(realized[s, 2])
             return cfg
 
         if n_configs == 1:
@@ -1285,22 +1409,8 @@ def main():
                                        corr_shift_interp)
                 for s in range(n_configs))
 
-        # Record the shape actually realised, so an emulator can join results to
-        # the deformation that produced them.
-        if fluctuate:
-            realized = np.array([
-                draw_deformation(deform_draws[s], beta2, sigma_beta2, beta3,
-                                 sigma_beta3, gamma, sigma_gamma)
-                for s in range(n_configs)
-            ])
-            print('realized deformation (beta2, gamma_lit, beta3) over '
-                  f'{n_configs} configuration(s): '
-                  f'beta2[{realized[:, 0].min():.4f}, {realized[:, 0].max():.4f}] '
-                  f'gamma_lit[{realized[:, 1].min():.4f}, {realized[:, 1].max():.4f}]'
-                  f' beta3[{realized[:, 2].min():.4f}, {realized[:, 2].max():.4f}]')
-        else:
-            realized = np.tile(
-                np.array([[beta2, gamma, beta3]]), (n_configs, 1))
+        # `realized` was computed before the nuclei were built and is reused
+        # here, so the recorded shape is by construction the applied shape.
 #         for s in range(n_configs):
 #             data[s,:,:] = build_nucleus(seeds[s],n_nucleons,*isobars[isobar],f2,fp2,f3,fp3)
 
