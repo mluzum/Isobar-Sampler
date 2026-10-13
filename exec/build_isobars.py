@@ -651,11 +651,22 @@ def fold_plane(beta20, beta22):
 # sigma_plane is the width of the isotropic Gaussian in the (beta20, beta22)
 # plane about the mean tensor. plane_anisotropy splits it into two widths with
 # the geometric mean held fixed, so 0 is exactly isotropic:
-#     sigma_a = sigma_plane * exp(+anisotropy/2)
-#     sigma_b = sigma_plane * exp(-anisotropy/2)
-# Negative favours prolate/oblate excursions (narrow in beta22), positive favours
-# triaxial ones. Kept optional because the emulator has to be shown able to
-# resolve it before it earns a place in a design.
+#     sigma_a = sigma_plane * exp(+anisotropy/2)   (a = beta20, prolate/oblate)
+#     sigma_b = sigma_plane * exp(-anisotropy/2)   (b = beta22, triaxiality)
+#
+# Sign convention, measured rather than assumed. Positive anisotropy widens
+# beta20 and pushes excursions along the prolate/oblate axis; negative widens
+# beta22 and makes the nucleus wander in gamma. At sigma_plane = 0.05 from the
+# apex, std(gamma_lit) runs 20.7 deg at anisotropy +1.4 against 24.4 deg at -1.4,
+# and from a prolate mean of beta = 0.12, gamma = 25 deg the prolate fraction runs
+# 0.661 at +1.4 against 0.530 at -1.4.
+#
+# Note the prolate fraction is NOT a usable probe at zero mean: it is pinned at
+# 0.500 for every covariance, because (a,b) -> (-a,-b) exchanges prolate and
+# oblate. std(gamma_lit) is the clean discriminator.
+#
+# Kept optional because the emulator has to be shown able to resolve it before
+# it earns a place in a design.
 PLANE_ANISOTROPY_LIMIT = np.log(4.0)
 
 
