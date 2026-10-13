@@ -267,18 +267,28 @@ def draw_deformation(z, beta2_mean, sigma_beta2, beta3_mean, sigma_beta3,
     pi, and folding keeps gamma interpretable. beta3 is signed and left alone
     -- its sign is physical (prolate/oblate octupole).
 
-    gamma lives on a circle of period 2*pi, so its draw is a *wrapped* normal
-    rather than a plain one: wrapping is what makes the distribution genuinely
-    circular, with no artificial edge at 0/2pi. A wrapped normal and a von
-    Mises agree to leading order at small width; the wrapped form is used
-    because it degenerates cleanly to a fixed gamma as sigma_gamma -> 0, which
-    keeps the fixed-deformation design point inside the same parameterisation
-    (a von Mises would need kappa -> infinity instead).
+    gamma is periodic, but its fundamental domain is NOT the full circle. For a
+    shape built from beta20 and beta22 alone (no beta21), a 90-degree rotation
+    about z sends (beta20, beta22) -> (beta20, -beta22), i.e. gamma -> -gamma,
+    and leaves Y30 -- and hence beta3 -- untouched. So gamma and -gamma describe
+    the same nucleus, and the canonical range is [0, pi), not [0, 2*pi). Verified
+    by solving for the explicit rotation: residual 9e-17 for gamma -> -gamma,
+    versus 7e-01 for gamma -> gamma + pi. Wrapping to 2*pi would therefore make
+    every shape appear exactly twice in the sampled design.
+
+    This is the only exact redundancy. The frequently quoted 0-60 deg range
+    belongs to a *different* variable, the ellipsoid (Davydov-Filipov)
+    triaxiality gamma_0, which is not what deform_nucleus takes; in the harmonic
+    (beta2, gamma) parameterisation here there is no 120 - gamma reflection.
+    See EMULATOR_SWEEP_PLAN.md.
     """
     beta2 = abs(beta2_mean + sigma_beta2 * z[0]) if sigma_beta2 > 0 else beta2_mean
     beta3 = beta3_mean + sigma_beta3 * z[1] if sigma_beta3 > 0 else beta3_mean
-    gamma = ((gamma_mean + sigma_gamma * z[2]) % (2.0 * np.pi)
-             if sigma_gamma > 0 else gamma_mean)
+    if sigma_gamma > 0:
+        gamma = np.abs((gamma_mean + sigma_gamma * z[2] + np.pi) % (2.0 * np.pi)
+                       - np.pi)
+    else:
+        gamma = gamma_mean
     return beta2, gamma, beta3
 
 
