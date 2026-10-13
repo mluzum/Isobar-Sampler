@@ -326,6 +326,17 @@ DEFAULT_BETA_MAX = 0.5
 # it into [0, 60].
 GAMMA_DOUBLE_DOMAIN_DEG = 120.0
 
+# How the per-event shape is drawn, given the design point.
+#   SHAPE_WEDGE  BetaGammaDistribution.md section 3 Option B: bounded Beta for
+#                (beta, gamma_lit) on the wedge, Gaussian for beta3.
+#   SHAPE_PLANE  a Gaussian in the (beta20, beta22) deformation plane about the
+#                mean tensor, folded per draw. This is the form that can express a
+#                nucleus with no mean deformation but real shape fluctuations,
+#                mixing prolate and oblate; the wedge form cannot, because the
+#                apex of the wedge is where all six symmetry sectors meet.
+SHAPE_WEDGE = 'wedge'
+SHAPE_PLANE = 'plane'
+
 
 def draw_deformation(u, z_beta3, beta2_mean, sigma_beta2, beta3_mean,
                      sigma_beta3, gamma_mean, sigma_gamma, beta_max):
@@ -611,6 +622,69 @@ def deform_nucleon(r,costheta,phi,R,beta20,beta22,beta3,beta4,f2,fp2,f3,fp3, f4,
 # Take configuration of a nucleus and deform it by shifting each nucleon with deform() function
 # Uncorrelated nucleons will still be uncorrelated after deformation.
 # Updated to include beta4 (hexadecapole deformation)
+def fold_plane(beta20, beta22):
+    """Fold harmonic coefficients into the fundamental sector.
+
+    The quadrupole plane carries the D_3 symmetry of the ellipsoid: cyclic
+    permutation of the three principal axes is a 120-degree rotation, and
+    reflecting an axis is a reflection. Verified: |T|^2 = 6 (b20^2 + b22^2), so
+    the plane is Euclidean in (beta20, beta22); the 120-degree rotation
+        (a, b) -> ((sqrt(3) b - a)/2, -(sqrt(3) a + b)/2)
+    preserves |T|^2 and has order 3; and empirically gamma_lit in [0, 60] deg
+    corresponds to phi = atan2(b22, b20) in [-60, 0] deg.
+
+    Reducing phi modulo 120 degrees and reflecting about 60 degrees lands in a
+    single sector; the reconstructed point is a genuine member of the orbit, so
+    it describes the same ellipsoid. Doing this per draw is what lets a
+    distribution spill across the wedge edges -- mixing prolate and oblate --
+    which a distribution confined to the wedge cannot express.
+    """
+    a = np.asarray(beta20, dtype=np.float64)
+    b = np.asarray(beta22, dtype=np.float64)
+    r = np.hypot(a, b)
+    phi = np.mod(np.arctan2(b, a), 2.0 * np.pi / 3.0)          # -> [0, 120)
+    phi = np.where(phi > np.pi / 3.0, 2.0 * np.pi / 3.0 - phi, phi)  # -> [0, 60]
+    phi = -phi                                                  # -> [-60, 0]
+    return r * np.cos(phi), r * np.sin(phi)
+
+
+# sigma_plane is the width of the isotropic Gaussian in the (beta20, beta22)
+# plane about the mean tensor. plane_anisotropy splits it into two widths with
+# the geometric mean held fixed, so 0 is exactly isotropic:
+#     sigma_a = sigma_plane * exp(+anisotropy/2)
+#     sigma_b = sigma_plane * exp(-anisotropy/2)
+# Negative favours prolate/oblate excursions (narrow in beta22), positive favours
+# triaxial ones. Kept optional because the emulator has to be shown able to
+# resolve it before it earns a place in a design.
+PLANE_ANISOTROPY_LIMIT = np.log(4.0)
+
+
+def draw_plane_shape(z, beta2_mean, gamma_lit_mean, sigma_plane, anisotropy):
+    """Per-configuration (beta20, beta22) from the mean tensor plus a plane draw.
+
+    z supplies two standard normals (the third is used for beta3 by the caller).
+    The mean is the *mean tensor*, given in wedge coordinates (beta2_mean,
+    gamma_lit_mean); the fluctuation is Gaussian in the plane and is folded per
+    draw. sigma_plane = 0 is exactly rigid, at any mean including the apex
+    beta2 = 0, where gamma_lit is undefined.
+
+    Note the asymmetry this creates: the mean TENSOR is fixed, but E[gamma_lit]
+    drifts toward the middle of the sector as sigma_plane grows, because the
+    fold is non-linear. That drift is a prediction of the model rather than a
+    distortion of the prior -- which is the reason to prefer this form.
+    """
+    mean20, mean22 = harmonic_from_gamma_lit(beta2_mean, gamma_lit_mean)
+    if sigma_plane > 0:
+        sa = sigma_plane * np.exp(0.5 * anisotropy)
+        sb = sigma_plane * np.exp(-0.5 * anisotropy)
+        beta20 = mean20 + sa * z[0]
+        beta22 = mean22 + sb * z[1]
+    else:
+        beta20 = np.full(np.shape(z[0]), mean20, dtype=np.float64)
+        beta22 = np.full(np.shape(z[1]), mean22, dtype=np.float64)
+    return fold_plane(beta20, beta22)
+
+
 def deform_nucleus(nucleus, R, beta20, beta22, beta3, beta4, f2, fp2, f3, fp3, f4, fp4):
 #   Takes the harmonic quadrupole coefficients directly rather than (beta2, gamma).
 #   The angle convention is the usual source of silent bugs here -- gamma_lit and
@@ -792,11 +866,22 @@ def build_nucleus(seeds_nucleus, n_nucleons, isobar_config, avgprob, f2, fp2, f3
 #         nucleus[n,:] = place_nucleon(Rws, R_step, w_gauss, beta2, gamma, beta3, seeds_nucleus[n], f2, fp2, f3, fp3)
         nucleus[n,:] = place_nucleon(R_step, w_gauss, seeds_nucleus[n])
 
-    # Perform angular deformation by shifting nucleon positions
-    if (beta2 != 0 or beta3 != 0 or beta4 != 0):
-        # gamma is the literature triaxiality angle; convert to the harmonic
-        # coefficients deform_nucleus is written in terms of.
+    # Prefer explicit harmonic coefficients when the caller supplied them --
+    # that is the plane form, where the realised shape has no single
+    # (beta2, gamma_lit) representative and must be passed through as drawn.
+    # Otherwise gamma is the literature triaxiality angle and is converted.
+    # The guard tests the coefficients, not beta2: in the plane form a design
+    # point can have beta2 = 0 and still fluctuate, and testing beta2 would
+    # silently drop those deformations.
+    explicit = 'beta20' in isobar_config and 'beta22' in isobar_config
+    if explicit:
+        beta20 = isobar_config['beta20']
+        beta22 = isobar_config['beta22']
+    else:
         beta20, beta22 = harmonic_from_gamma_lit(beta2, gamma)
+
+    # Perform angular deformation by shifting nucleon positions
+    if (beta20 != 0 or beta22 != 0 or beta3 != 0 or beta4 != 0):
         nucleus = deform_nucleus(nucleus, R_ws, beta20, beta22, beta3, beta4, f2, fp2,f3,fp3, f4, fp4)
         
 
@@ -1204,6 +1289,17 @@ def main():
             if beta_max <= 0:
                 raise ValueError(
                     f"beta_max must be positive, got {beta_max}")
+            shape_distribution = str(
+                _nested_value(isobar_conf, ('shape_distribution', 'value'),
+                              SHAPE_WEDGE))
+            if shape_distribution not in (SHAPE_WEDGE, SHAPE_PLANE):
+                raise ValueError(
+                    f"shape_distribution must be {SHAPE_WEDGE!r} or "
+                    f"{SHAPE_PLANE!r}, got {shape_distribution!r}")
+            sigma_plane = float(
+                _nested_value(isobar_conf, ('sigma_plane', 'value'), 0.0))
+            anisotropy = float(
+                _nested_value(isobar_conf, ('plane_anisotropy', 'value'), 0.0))
             if ((sigma_beta2 > 0 or sigma_beta3 > 0 or sigma_gamma > 0)
                     and 'master_seed' not in conf_samples):
                 print("Error: sigma_beta_2 / sigma_beta_3 / sigma_gamma "
@@ -1267,7 +1363,13 @@ def main():
         sigma_beta3 = isobar_config['sigma_beta3']
         sigma_gamma = isobar_config['sigma_gamma']
         fluctuate = sigma_beta2 > 0 or sigma_beta3 > 0 or sigma_gamma > 0
-        if fluctuate or (beta2 != 0 or beta3 != 0 or beta4 != 0):
+        # The plane form can fluctuate with beta2 = 0 as the mean, so the
+        # potentials have to be built on the shape draw rather than on the
+        # design point's mean deformation.
+        plane_active = (shape_distribution == SHAPE_PLANE and
+                        (sigma_plane > 0 or beta2 != 0 or beta3 != 0 or
+                         beta4 != 0))
+        if fluctuate or plane_active or (beta2 != 0 or beta3 != 0 or beta4 != 0):
             cached = _DEFORM_SOLVE_CACHE.get((R_ws, a_ws))
             if cached is None:
                 print(f'Solving differential equation for angular deformation.  {R_ws=} {a_ws=}')
@@ -1374,12 +1476,40 @@ def main():
         # Realise every configuration's shape once, up front. The nuclei below
         # and the provenance written after them both read from this single
         # array, so they cannot disagree about what shape was actually applied.
-        if fluctuate:
+        if shape_distribution == SHAPE_PLANE:
+            if sigma_plane > 0 and abs(anisotropy) > PLANE_ANISOTROPY_LIMIT:
+                raise ValueError(
+                    f"plane_anisotropy {anisotropy} exceeds "
+                    f"+/-{PLANE_ANISOTROPY_LIMIT:.3f}")
+            b20, b22 = draw_plane_shape(
+                deform_draws[:n_configs, :2].T, beta2, gamma, sigma_plane,
+                anisotropy)
+            if sigma_beta3 > 0:
+                b3 = beta3 + sigma_beta3 * deform_draws[:n_configs, 2]
+            else:
+                b3 = np.full(n_configs, beta3, dtype=np.float64)
+            # gamma_lit is recorded in radians, matching the wedge branch and the
+            # `gamma` config key. Recording degrees here would make this file's
+            # outputs incomparable between the two modes.
+            realized = np.column_stack(
+                [np.hypot(b20, np.sqrt(2.0) * b22),
+                 gamma_lit_from_harmonic(b20, b22), b3])
+            plane_coeffs = (b20, b22)
+            print('realized deformation (plane) over '
+                  f'{n_configs} configuration(s): '
+                  f'beta20[{b20.min():+.4f}, {b20.max():+.4f}] '
+                  f'beta22[{b22.min():+.4f}, {b22.max():+.4f}] '
+                  f'beta[{realized[:, 0].min():.4f}, {realized[:, 0].max():.4f}]'
+                  f' gamma_lit[{np.degrees(realized[:, 1].min()):.1f}, '
+                  f'{np.degrees(realized[:, 1].max()):.1f}] deg'
+                  f' beta3[{realized[:, 2].min():.4f}, {realized[:, 2].max():.4f}]')
+        elif fluctuate:
             realized = np.column_stack(
                 draw_deformation(shape_uniforms[:n_configs],
                                  deform_draws[:n_configs, 1], beta2,
                                  sigma_beta2, beta3, sigma_beta3, gamma,
                                  sigma_gamma, beta_max))
+            plane_coeffs = None
             print('realized deformation (beta2, gamma_lit, beta3) over '
                   f'{n_configs} configuration(s): '
                   f'beta2[{realized[:, 0].min():.4f}, {realized[:, 0].max():.4f}] '
@@ -1387,8 +1517,15 @@ def main():
                   f' beta3[{realized[:, 2].min():.4f}, {realized[:, 2].max():.4f}]')
         else:
             realized = np.tile(np.array([[beta2, gamma, beta3]]), (n_configs, 1))
+            plane_coeffs = None
 
         def config_for(s):
+            if plane_coeffs is not None:
+                cfg = dict(isobar_config)
+                cfg['beta20'] = float(plane_coeffs[0][s])
+                cfg['beta22'] = float(plane_coeffs[1][s])
+                cfg['beta3'] = float(realized[s, 2])
+                return cfg
             if not fluctuate:
                 return isobar_config
             cfg = dict(isobar_config)
@@ -1416,9 +1553,14 @@ def main():
 
         # The harmonic coefficients actually handed to deform_nucleus, so the
         # output can be traced back to the exact surface expansion without
-        # redoing the gamma_lit -> (beta20, beta22) conversion.
-        harmonic = np.array(
-            [harmonic_from_gamma_lit(r[0], r[1]) for r in np.asarray(realized)])
+        # redoing the gamma_lit -> (beta20, beta22) conversion. In the plane
+        # form these are the folded draws themselves.
+        if plane_coeffs is not None:
+            harmonic = np.column_stack(plane_coeffs)
+        else:
+            harmonic = np.array([
+                harmonic_from_gamma_lit(r[0], r[1]) for r in np.asarray(realized)
+            ])
 
         with h5py.File(out_dir+'/'+isobar_config['name']+'.hdf', 'w') as f:
             data_set = f.create_dataset(isobar_config['name'],(n_configs,n_nucleons,3))
@@ -1440,6 +1582,12 @@ def main():
             f.attrs['sigma_beta2'] = float(sigma_beta2)
             f.attrs['sigma_beta3'] = float(sigma_beta3)
             f.attrs['sigma_gamma'] = float(sigma_gamma)
+            f.attrs['shape_distribution'] = shape_distribution
+            if shape_distribution == SHAPE_PLANE:
+                f.attrs['sigma_plane'] = float(sigma_plane)
+                f.attrs['plane_anisotropy'] = float(anisotropy)
+                f.attrs['mean_beta2'] = float(beta2)
+                f.attrs['mean_gamma_lit_deg'] = float(np.degrees(gamma))
             
 #%%
 if __name__ == "__main__":
