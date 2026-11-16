@@ -1114,6 +1114,19 @@ def main():
     start_configuration = 0
     if 'start_configuration' in conf_samples:
         start_configuration = int(conf_samples['start_configuration']['value'])
+    # Configuration i of this call sits at pool address
+    # (start_configuration + i * configuration_stride) mod pool_modulus.
+    # The default stride of 1 gives consecutive addresses, as before.  A stride
+    # lets one call produce the configurations of a run of events whose
+    # addresses are an arithmetic progression rather than consecutive -- and
+    # each is identical to what a separate one-configuration call at that
+    # address produces, because a configuration depends only on
+    # (master_seed, address).
+    configuration_stride = int(
+        _nested_value(conf_samples, ('configuration_stride', 'value'), 1))
+    if configuration_stride < 1:
+        print(f"Error: configuration_stride {configuration_stride} must be >= 1")
+        sys.exit(1)
 
     if seed_source == SEED_SOURCE_PHILOX:
         master_seed = _nested_value(conf_samples, ('master_seed', 'value'))
@@ -1127,22 +1140,31 @@ def main():
             print(f"Error: start_configuration {start_configuration} out of "
                   f"range [0, {pool_modulus})")
             sys.exit(1)
-        seeds = generate_seed_rows(int(master_seed),
-                                   range(start_configuration,
-                                         start_configuration + n_configs),
+        if configuration_stride == 1:
+            pool_addresses = range(start_configuration,
+                                   start_configuration + n_configs)
+        else:
+            pool_addresses = [
+                (start_configuration + i * configuration_stride) % pool_modulus
+                for i in range(n_configs)
+            ]
+        seeds = generate_seed_rows(int(master_seed), pool_addresses,
                                    n_nucleons)
         if seeds.shape[0] < n_configs:
             n_configs = seeds.shape[0]
         # Deformation latents are keyed on the same index (a pool address under
         # 'philox', a row under 'file'), so a given configuration always keeps
         # the same shape draw whichever source supplied its nucleon positions.
-        shape_addresses = range(start_configuration,
-                                start_configuration + n_configs)
+        shape_addresses = pool_addresses
         deform_draws = generate_deformation_draws(int(master_seed),
                                                   shape_addresses)
         shape_uniforms = generate_shape_uniforms(int(master_seed),
                                                   shape_addresses)
     elif seed_source == SEED_SOURCE_FILE:
+        if configuration_stride != 1:
+            print("Error: configuration_stride needs seed_source 'philox'; a "
+                  "seed file is read as consecutive rows.")
+            sys.exit(1)
         # Read only the rows this invocation needs. The previous form read the
         # whole dataset (f['isobar_seeds'][:,:,:]) and sliced afterwards, which
         # for the canonical 10000x300x6 pool costs ~430 ms of I/O per
@@ -1596,6 +1618,7 @@ def main():
             f.attrs['master_seed'] = int(
                 _nested_value(conf_samples, ('master_seed', 'value'), 0))
             f.attrs['start_configuration'] = int(start_configuration)
+            f.attrs['configuration_stride'] = int(configuration_stride)
             f.attrs['seed_source'] = seed_source
             f.attrs['sigma_beta2'] = float(sigma_beta2)
             f.attrs['sigma_beta3'] = float(sigma_beta3)
