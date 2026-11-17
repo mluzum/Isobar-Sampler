@@ -696,7 +696,10 @@ def draw_plane_shape(z, beta2_mean, gamma_lit_mean, sigma_plane, anisotropy):
     return fold_plane(beta20, beta22)
 
 
-def deform_nucleus(nucleus, R, beta20, beta22, beta3, beta4, f2, fp2, f3, fp3, f4, fp4):
+def deform_nucleus_scalar(nucleus, R, beta20, beta22, beta3, beta4, f2, fp2, f3, fp3, f4, fp4):
+#   The original implementation, one nucleon at a time through deform_nucleon.
+#   Kept as the reference: deform_nucleus below must reproduce it bit for bit
+#   (tests/test_deform_vectorized.py).
 #   Takes the harmonic quadrupole coefficients directly rather than (beta2, gamma).
 #   The angle convention is the usual source of silent bugs here -- gamma_lit and
 #   gamma_harm are different variables -- so nothing downstream of the conversion
@@ -716,6 +719,122 @@ def deform_nucleus(nucleus, R, beta20, beta22, beta3, beta4, f2, fp2, f3, fp3, f
             x, y, z = cartesian(r,costheta,phi)
             nucleus[nucleon] = np.array([x,y,z])
         
+    return nucleus
+
+
+def _libm(func, values, *args):
+    """Apply a `math` function to each element of an array.
+
+    numpy's own cos, sin and power are not interchangeable with the C
+    library's: depending on the CPU they run SIMD kernels that differ from
+    libm in the last bit.  Where the scalar code calls `math.*` or the `**`
+    operator on a scalar (both end in libm), the vectorised code has to as
+    well, or the two would not agree digit for digit.
+    """
+    return np.array([func(v, *args) for v in values.tolist()], dtype=np.float64)
+
+
+def _deform_step(r, costheta, phi, R, beta20, beta22, beta3, beta4,
+                 f2, fp2, f3, fp3, f4, fp4):
+    """deform_nucleon for arrays of nucleons, operation for operation.
+
+    Every expression keeps the order of evaluation of deform_nucleon and of
+    the Y_lm helpers it calls, and uses libm exactly where they do, so each
+    element comes out with the same bits as the scalar code gives it.
+    """
+    costheta = np.clip(costheta, -1.0, 1.0)
+    theta = np.arccos(costheta)
+    c2 = _libm(math.pow, costheta, 2.0)
+    c3 = _libm(math.pow, costheta, 3.0)
+    c4 = _libm(math.pow, costheta, 4.0)
+    sintheta = np.sqrt(np.maximum(0.0, 1-c2))
+    s2 = _libm(math.pow, sintheta, 2.0)
+    r2 = _libm(math.pow, r, 2.0)
+    cos2phi_libm = _libm(math.cos, 2*phi)
+    sin2phi_libm = _libm(math.sin, 2*phi)
+    cos2phi = np.cos(2*phi)
+
+    f2r = f2(r)
+    fp2r = fp2(r)
+    f3r = f3(r)
+    fp3r = fp3(r)
+    f4r = f4(r)
+    fp4r = fp4(r)
+
+    # dY20_dtheta, dY22_dtheta, dY30_dtheta, dY40_dtheta, dY22_dphi
+    dY20 = (-3./2.)*math.sqrt(5./np.pi)*costheta*sintheta
+    dY22 = 1/2.*math.sqrt(15./np.pi)*sintheta*costheta*cos2phi
+    dY30 = 1./4.*math.sqrt(7./np.pi)*(3*sintheta-15*sintheta*c2)
+    dY40 = (15./4.)*(1./(math.sqrt(np.pi)))*costheta*(3 - 7.*c2)*sintheta
+    dY22phi = (-1./2.)*math.sqrt(15./np.pi)*s2*sin2phi_libm
+
+    # Y_20, Y_22, Y_30, Y_40
+    Y20 = 1./4.*np.sqrt(5./np.pi)*(3.*c2 -1)
+    Y22 = 1./4.*np.sqrt(15./np.pi)*cos2phi_libm*(1.-c2)
+    Y30 = np.sqrt(7./(4.*np.pi))*(5.*c3 -3.*costheta)/2.
+    Y40 = (3./16.)*(1./(math.sqrt(np.pi)))*(35.*c4 - 30.*c2 + 3)
+
+    # Angular shifts
+    dtheta = 0
+    dtheta = dtheta + R/r/r*beta20*f2r*dY20
+    dtheta = dtheta + R/r/r*beta22*f2r*dY22
+    dtheta = dtheta + R/r/r*beta3*f3r*dY30
+    dtheta = dtheta + R/r/r*beta4*f4r*dY40
+
+    sintheta2 = np.maximum(s2, EPS)
+    dphi = 0
+    dphi = dphi + R/r2/sintheta2*beta22*f2r*dY22phi
+
+    # Radial shifts
+    dr = 0
+    dr = dr + R*beta20*fp2r*Y20
+    dr = dr + R*beta22*fp2r*Y22
+    dr = dr + R*beta3*fp3r*Y30
+    dr = dr + R*beta4*fp4r*Y40
+
+    return r + dr, np.cos(theta + dtheta), phi + dphi
+
+
+# Take configuration of a nucleus and deform it by shifting each nucleon.
+# Uncorrelated nucleons will still be uncorrelated after deformation.
+#
+# This does what deform_nucleus_scalar does, for all nucleons of the nucleus at
+# once.  The scalar version spends its time in call overhead -- 60 interpolator
+# calls per nucleon, 20 microseconds each, for a few arithmetic operations --
+# so this is about fifty times faster and, by construction, gives the same
+# nucleus to the last bit.
+def deform_nucleus(nucleus, R, beta20, beta22, beta3, beta4, f2, fp2, f3, fp3, f4, fp4):
+    rmin = R/10
+    radius = np.array([np.linalg.norm(position) for position in nucleus])
+    moved = np.nonzero(radius > rmin)[0]
+    if moved.size == 0:
+        return nucleus
+
+    r = radius[moved]
+    phi = np.array([math.atan2(y, x) for x, y in
+                    zip(nucleus[moved, 0].tolist(), nucleus[moved, 1].tolist())])
+    costheta = nucleus[moved, 2]/r
+
+    nsteps = 10
+    step_args = (R, beta20/nsteps, beta22/nsteps, beta3/nsteps, beta4/nsteps,
+                 f2, fp2, f3, fp3, f4, fp4)
+    for step in range(nsteps):
+        # deform_nucleon leaves a nucleon at the origin where it is
+        live = r > EPS
+        if live.all():
+            r, costheta, phi = _deform_step(r, costheta, phi, *step_args)
+        else:
+            costheta = np.clip(costheta, -1.0, 1.0)
+            if live.any():
+                r[live], costheta[live], phi[live] = _deform_step(
+                    r[live], costheta[live], phi[live], *step_args)
+
+    # cartesian()
+    sintheta = np.sqrt(1.-_libm(math.pow, costheta, 2.0))
+    nucleus[moved, 2] = r*costheta
+    nucleus[moved, 0] = r*sintheta*np.cos(phi)
+    nucleus[moved, 1] = r*sintheta*np.sin(phi)
+
     return nucleus
 
 

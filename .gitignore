@@ -1,3 +1,4 @@
 *.hdf
 *.dat
 *.xoj
+__pycache__/
